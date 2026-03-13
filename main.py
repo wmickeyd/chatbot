@@ -24,10 +24,24 @@ intents.message_content = True
 # Define bot prefix
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-async def ask_ollama(prompt):
+# Memory storage (channel_id -> list of messages)
+memory = {}
+
+async def ask_ollama(prompt, channel_id=None):
+    # Initialize memory for the channel if it doesn't exist
+    if channel_id and channel_id not in memory:
+        memory[channel_id] = []
+    
+    # Construct the full prompt with context
+    context_prompt = ""
+    if channel_id:
+        for msg in memory[channel_id]:
+            context_prompt += f"{msg['role']}: {msg['content']}\n"
+    context_prompt += f"user: {prompt}\nassistant: "
+
     payload = {
         "model": OLLAMA_MODEL,
-        "prompt": prompt,
+        "prompt": context_prompt,
         "stream": False
     }
     timeout = aiohttp.ClientTimeout(total=300) # 5 minute timeout
@@ -36,7 +50,17 @@ async def ask_ollama(prompt):
             async with session.post(OLLAMA_URL, json=payload) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data.get('response', 'Sorry, I couldn\'t get a response from Ollama.')
+                    ai_response = data.get('response', 'Sorry, I couldn\'t get a response from Ollama.')
+                    
+                    # Update memory
+                    if channel_id:
+                        memory[channel_id].append({"role": "user", "content": prompt})
+                        memory[channel_id].append({"role": "assistant", "content": ai_response})
+                        # Limit memory to last 10 messages (5 exchanges)
+                        if len(memory[channel_id]) > 10:
+                            memory[channel_id] = memory[channel_id][-10:]
+                    
+                    return ai_response
                 else:
                     logger.error(f"Ollama error: {response.status}")
                     return f"Error: Ollama returned status {response.status}"
@@ -75,8 +99,8 @@ async def on_message(message):
             if not prompt:
                 prompt = "Hello!"
 
-            logger.info(f'Asking Ollama: {prompt}')
-            response = await ask_ollama(prompt)
+            logger.info(f'Asking Ollama (with context): {prompt}')
+            response = await ask_ollama(prompt, channel_id=message.channel.id)
             await message.channel.send(response)
 
     await bot.process_commands(message)
