@@ -1,5 +1,4 @@
-discord.py
+discord.py[voice]
 python-dotenv
 aiohttp
-PyNaCl
 gTTS

@@ -74,6 +74,21 @@ async def ask_ollama(prompt, channel_id=None):
 async def on_ready():
     logger.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
     logger.info(f'Using Ollama model: {OLLAMA_MODEL} at {OLLAMA_URL}')
+    
+    # Check for voice support
+    try:
+        import nacl
+        logger.info("PyNaCl is installed and available.")
+    except ImportError:
+        logger.error("PyNaCl is NOT installed correctly!")
+
+    try:
+        if not discord.opus.is_loaded():
+            discord.opus.load_opus('libopus.so.0')
+        logger.info(f"Opus is loaded: {discord.opus.is_loaded()}")
+    except Exception as e:
+        logger.error(f"Failed to load Opus: {e}")
+
     logger.info('------')
 
 @bot.event
@@ -96,6 +111,8 @@ async def join(ctx):
 @bot.command()
 async def leave(ctx):
     if ctx.voice_client:
+        if ctx.voice_client.is_playing():
+            ctx.voice_client.stop()
         await ctx.voice_client.disconnect()
         logger.info("Left voice channel.")
     else:
@@ -130,6 +147,11 @@ async def ping(ctx):
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
+        return
+
+    # Don't process AI responses for commands
+    if message.content.startswith(bot.command_prefix):
+        await bot.process_commands(message)
         return
 
     # Check if the bot is mentioned or if it's a DM
