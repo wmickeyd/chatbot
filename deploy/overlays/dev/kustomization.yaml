@@ -14,7 +14,7 @@ patches:
       path: /spec/template/spec/containers/0/env/-
       value:
         name: OLLAMA_URL
-        value: "http://ollama-service.ollama.svc.cluster.local:11434/api/generate"
+        value: "http://ollama.ollama.svc.cluster.local:11434/api/generate"
     - op: add
       path: /spec/template/spec/containers/0/env/-
       value:
