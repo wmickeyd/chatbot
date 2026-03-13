@@ -103,8 +103,16 @@ async def on_resumed():
 async def join(ctx):
     if ctx.author.voice:
         channel = ctx.author.voice.channel
-        await channel.connect()
-        logger.info(f"Joined voice channel: {channel}")
+        try:
+            # Set a timeout for the voice connection
+            await asyncio.wait_for(channel.connect(), timeout=10.0)
+            logger.info(f"Joined voice channel: {channel}")
+        except asyncio.TimeoutError:
+            await ctx.send("Connection to voice channel timed out.")
+            logger.error("Voice connection timed out.")
+        except Exception as e:
+            await ctx.send(f"Failed to join voice channel: {e}")
+            logger.error(f"Error joining voice: {e}")
     else:
         await ctx.send("You need to be in a voice channel first!")
 
@@ -165,15 +173,24 @@ async def on_message(message):
             response = await ask_ollama(prompt, channel_id=message.channel.id)
             
             # If bot is in a voice channel, speak the response too
-            if message.guild.voice_client:
+            if message.guild and message.guild.voice_client:
                 # Use a separate task for TTS to not block message sending
-                tts = gTTS(text=response, lang='en')
-                filename = f"speech_{message.id}.mp3"
-                tts.save(filename)
-                source = discord.FFmpegPCMAudio(filename)
-                message.guild.voice_client.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
+                try:
+                    # For voice, we might want to truncate if it's too long, but let's try the full text first
+                    tts = gTTS(text=response[:1000], lang='en') # Truncate TTS for performance
+                    filename = f"speech_{message.id}.mp3"
+                    tts.save(filename)
+                    source = discord.FFmpegPCMAudio(filename)
+                    message.guild.voice_client.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
+                except Exception as e:
+                    logger.error(f"TTS Error: {e}")
             
-            await message.channel.send(response)
+            # Split and send the response if it's too long
+            if len(response) > 2000:
+                for i in range(0, len(response), 2000):
+                    await message.channel.send(response[i:i+2000])
+            else:
+                await message.channel.send(response)
 
     await bot.process_commands(message)
 
