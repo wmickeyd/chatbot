@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: chatbot
-        image: chatbot:latest
+        image: wmcdonald/chatbot:latest
         resources:
           limits:
             cpu: "500m"
