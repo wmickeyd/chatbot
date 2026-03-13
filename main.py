@@ -30,7 +30,7 @@ async def ask_ollama(prompt):
         "prompt": prompt,
         "stream": False
     }
-    timeout = aiohttp.ClientTimeout(total=60) # 1 minute timeout
+    timeout = aiohttp.ClientTimeout(total=300) # 5 minute timeout
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(OLLAMA_URL, json=payload) as response:
