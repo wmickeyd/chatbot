@@ -50,6 +50,14 @@ async def on_ready():
     logger.info(f'Using Ollama model: {OLLAMA_MODEL} at {OLLAMA_URL}')
     logger.info('------')
 
+@bot.event
+async def on_disconnect():
+    logger.warning("Bot has disconnected from the Discord gateway. Attempting to reconnect...")
+
+@bot.event
+async def on_resumed():
+    logger.info("Bot has successfully resumed its session.")
+
 @bot.command()
 async def ping(ctx):
     logger.info(f'Ping command received from {ctx.author}')
