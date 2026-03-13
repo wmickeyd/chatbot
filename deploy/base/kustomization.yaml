@@ -1,6 +1,10 @@
 resources:
 - deployment.yaml
-- secret.yaml
+
+secretGenerator:
+- name: chatbot-secrets
+  envs:
+  - ../../.env
 
 labels:
 - pairs:
