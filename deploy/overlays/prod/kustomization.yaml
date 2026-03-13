@@ -1,0 +1,16 @@
+resources:
+- ../../base
+
+namePrefix: prod-
+commonLabels:
+  environment: production
+
+# Example of increasing resources for production
+patches:
+- target:
+    kind: Deployment
+    name: chatbot
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources/limits/memory
+      value: "1Gi"
