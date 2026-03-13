@@ -22,4 +22,4 @@ patches:
       path: /spec/template/spec/containers/0/env/-
       value:
         name: OLLAMA_MODEL
-        value: "phi3:mini"
+        value: "qwen2.5:3b"
