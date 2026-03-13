@@ -1,9 +1,12 @@
 resources:
 - ../../base
 
+namespace: chatbot-dev
+
 namePrefix: dev-
-commonLabels:
-  environment: development
+labels:
+- pairs:
+    environment: development
 
 patches:
 - target:

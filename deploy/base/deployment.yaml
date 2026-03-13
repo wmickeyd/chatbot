@@ -14,9 +14,12 @@ spec:
       labels:
         app: chatbot
     spec:
+      imagePullSecrets:
+      - name: regcred
       containers:
       - name: chatbot
         image: wmcdonald/chatbot:latest
+        imagePullPolicy: Always
         resources:
           limits:
             cpu: "500m"
