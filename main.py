@@ -4,6 +4,8 @@ import os
 import logging
 import aiohttp
 import json
+from gtts import gTTS
+import asyncio
 from dotenv import load_dotenv
 
 # Set up logging
@@ -83,6 +85,44 @@ async def on_resumed():
     logger.info("Bot has successfully resumed its session.")
 
 @bot.command()
+async def join(ctx):
+    if ctx.author.voice:
+        channel = ctx.author.voice.channel
+        await channel.connect()
+        logger.info(f"Joined voice channel: {channel}")
+    else:
+        await ctx.send("You need to be in a voice channel first!")
+
+@bot.command()
+async def leave(ctx):
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        logger.info("Left voice channel.")
+    else:
+        await ctx.send("I'm not in a voice channel!")
+
+@bot.command()
+async def speak(ctx, *, text=None):
+    if not ctx.voice_client:
+        if ctx.author.voice:
+            await ctx.author.voice.channel.connect()
+        else:
+            return await ctx.send("You need to be in a voice channel first!")
+
+    if not text:
+        return await ctx.send("Please provide some text for me to say.")
+
+    async with ctx.typing():
+        # Turn text into audio
+        tts = gTTS(text=text, lang='en')
+        tts.save("speech.mp3")
+
+        # Play audio
+        source = discord.FFmpegPCMAudio("speech.mp3")
+        ctx.voice_client.play(source, after=lambda e: os.remove("speech.mp3") if os.path.exists("speech.mp3") else None)
+        logger.info(f"Speaking: {text}")
+
+@bot.command()
 async def ping(ctx):
     logger.info(f'Ping command received from {ctx.author}')
     await ctx.send('Pong!')
@@ -101,6 +141,16 @@ async def on_message(message):
 
             logger.info(f'Asking Ollama (with context): {prompt}')
             response = await ask_ollama(prompt, channel_id=message.channel.id)
+            
+            # If bot is in a voice channel, speak the response too
+            if message.guild.voice_client:
+                # Use a separate task for TTS to not block message sending
+                tts = gTTS(text=response, lang='en')
+                filename = f"speech_{message.id}.mp3"
+                tts.save(filename)
+                source = discord.FFmpegPCMAudio(filename)
+                message.guild.voice_client.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
+            
             await message.channel.send(response)
 
     await bot.process_commands(message)
