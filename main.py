@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(dotenv_path="deploy/base/.env")
 
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
