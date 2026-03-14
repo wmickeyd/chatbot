@@ -46,7 +46,7 @@ async def ask_ollama(prompt, channel_id=None):
         "prompt": context_prompt,
         "stream": False
     }
-    timeout = aiohttp.ClientTimeout(total=300) # 5 minute timeout
+    timeout = aiohttp.ClientTimeout(total=60) # 1 minute timeout
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(OLLAMA_URL, json=payload) as response:
@@ -66,6 +66,9 @@ async def ask_ollama(prompt, channel_id=None):
                 else:
                     logger.error(f"Ollama error: {response.status}")
                     return f"Error: Ollama returned status {response.status}"
+    except asyncio.TimeoutError:
+        logger.error("Ollama request timed out after 60 seconds.")
+        return "Ollama is taking too long to respond. Please try again in a moment."
     except Exception as e:
         logger.error(f"Error calling Ollama: {e}")
         return "Sorry, I'm having trouble connecting to my brain right now."
@@ -179,7 +182,11 @@ async def on_message(message):
                     # For voice, we might want to truncate if it's too long, but let's try the full text first
                     tts = gTTS(text=response[:1000], lang='en') # Truncate TTS for performance
                     filename = f"speech_{message.id}.mp3"
-                    tts.save(filename)
+                    
+                    # Run tts.save in a thread to not block the main loop
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, tts.save, filename)
+                    
                     source = discord.FFmpegPCMAudio(filename)
                     message.guild.voice_client.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
                 except Exception as e:
