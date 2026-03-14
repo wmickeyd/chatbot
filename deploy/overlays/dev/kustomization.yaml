@@ -23,3 +23,8 @@ patches:
       value:
         name: OLLAMA_MODEL
         value: "qwen2.5:3b"
+    - op: add
+      path: /spec/template/spec/containers/0/env/-
+      value:
+        name: OLLAMA_VISION_MODEL
+        value: "moondream"

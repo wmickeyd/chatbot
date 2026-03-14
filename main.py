@@ -5,6 +5,7 @@ import logging
 import aiohttp
 import json
 import re
+import base64
 import wikipediaapi
 from gtts import gTTS
 import asyncio
@@ -20,6 +21,7 @@ load_dotenv(dotenv_path="deploy/base/.env")
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3')
+OLLAMA_VISION_MODEL = os.getenv('OLLAMA_VISION_MODEL', 'llava')
 SCRAPER_URL = os.getenv('SCRAPER_URL', 'http://webscraper.webscraper-dev.svc.cluster.local/read')
 SEARCH_URL = os.getenv('SEARCH_URL', 'http://webscraper.webscraper-dev.svc.cluster.local/search')
 
@@ -68,23 +70,30 @@ async def read_url(url):
         logger.error(f"Error calling scraper: {e}")
         return f"Could not reach my browser right now. (Error: {e})"
 
-async def ask_ollama(prompt, channel_id=None):
+async def ask_ollama(prompt, channel_id=None, images=None):
     # Initialize memory for the channel if it doesn't exist
     if channel_id and channel_id not in memory:
         memory[channel_id] = []
     
+    # Use vision model if images are provided, otherwise use text model
+    model = OLLAMA_VISION_MODEL if images else OLLAMA_MODEL
+
     # Construct the full prompt with context
     context_prompt = ""
-    if channel_id:
+    if channel_id and not images: # History is mostly useful for text chat
         for msg in memory[channel_id]:
             context_prompt += f"{msg['role']}: {msg['content']}\n"
     context_prompt += f"user: {prompt}\nassistant: "
 
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": model,
         "prompt": context_prompt,
         "stream": False
     }
+    
+    if images:
+        payload["images"] = images
+
     timeout = aiohttp.ClientTimeout(total=60) # 1 minute timeout
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -93,11 +102,10 @@ async def ask_ollama(prompt, channel_id=None):
                     data = await response.json()
                     ai_response = data.get('response', 'Sorry, I couldn\'t get a response from Ollama.')
                     
-                    # Update memory
-                    if channel_id:
+                    # Update memory (only for text chat)
+                    if channel_id and not images:
                         memory[channel_id].append({"role": "user", "content": prompt})
                         memory[channel_id].append({"role": "assistant", "content": ai_response})
-                        # Limit memory to last 10 messages (5 exchanges)
                         if len(memory[channel_id]) > 10:
                             memory[channel_id] = memory[channel_id][-10:]
                     
@@ -115,7 +123,7 @@ async def ask_ollama(prompt, channel_id=None):
 @bot.event
 async def on_ready():
     logger.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
-    logger.info(f'Using Ollama model: {OLLAMA_MODEL} at {OLLAMA_URL}')
+    logger.info(f'Using Ollama models: {OLLAMA_MODEL} (Text) and {OLLAMA_VISION_MODEL} (Vision)')
     
     # Check for voice support
     try:
@@ -153,15 +161,11 @@ async def wiki(ctx, *, query: str):
         page = wiki_wiki.page(query)
         
         if page.exists():
-            # Get the summary (truncated to 1500 chars for Discord)
             summary = page.summary[:1500] + "..." if len(page.summary) > 1500 else page.summary
-            
             embed = discord.Embed(title=page.title, url=page.fullurl, color=discord.Color.green())
             embed.description = summary
             embed.set_footer(text="Source: Wikipedia")
-            
             await ctx.send(embed=embed)
-            logger.info(f"Found Wikipedia page for {query}")
         else:
             await ctx.send(f"I couldn't find a Wikipedia page for '{query}'.")
 
@@ -172,26 +176,21 @@ async def track(ctx, url: str):
         return await ctx.send("Please provide a valid LEGO.com URL.")
 
     async with ctx.typing():
-        logger.info(f"Tracking LEGO URL: {url}")
         params = {"url": url}
         timeout = aiohttp.ClientTimeout(total=60)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                # Use the scraper's /scrape endpoint specifically for LEGO
                 async with session.get(os.getenv('SCRAPER_BASE_URL', 'http://webscraper.webscraper-dev.svc.cluster.local') + '/scrape', params=params) as response:
                     if response.status == 200:
                         data = await response.json()
                         name = data.get('name', 'Unknown Set')
                         prod_num = data.get('product_number', 'N/A')
                         price = data.get('price', 'Price not found')
-                        
                         embed = discord.Embed(title=f"LEGO Tracking: {name}", color=discord.Color.blue())
                         embed.add_field(name="Product Number", value=prod_num, inline=True)
                         embed.add_field(name="Current Price", value=f"${price}" if price != 'Price not found' else price, inline=True)
                         embed.set_footer(text=f"URL: {url}")
-                        
                         await ctx.send(embed=embed)
-                        logger.info(f"Tracked {name} (${price})")
                     else:
                         await ctx.send(f"Error from scraper: {response.status}")
         except Exception as e:
@@ -203,15 +202,12 @@ async def join(ctx):
     if ctx.author.voice:
         channel = ctx.author.voice.channel
         try:
-            # Set a timeout for the voice connection
             await asyncio.wait_for(channel.connect(), timeout=10.0)
             logger.info(f"Joined voice channel: {channel}")
         except asyncio.TimeoutError:
             await ctx.send("Connection to voice channel timed out.")
-            logger.error("Voice connection timed out.")
         except Exception as e:
             await ctx.send(f"Failed to join voice channel: {e}")
-            logger.error(f"Error joining voice: {e}")
     else:
         await ctx.send("You need to be in a voice channel first!")
 
@@ -232,23 +228,18 @@ async def speak(ctx, *, text=None):
             await ctx.author.voice.channel.connect()
         else:
             return await ctx.send("You need to be in a voice channel first!")
-
     if not text:
         return await ctx.send("Please provide some text for me to say.")
-
     async with ctx.typing():
-        # Turn text into audio
         tts = gTTS(text=text, lang='en')
-        tts.save("speech.mp3")
-
-        # Play audio
-        source = discord.FFmpegPCMAudio("speech.mp3")
-        ctx.voice_client.play(source, after=lambda e: os.remove("speech.mp3") if os.path.exists("speech.mp3") else None)
-        logger.info(f"Speaking: {text}")
+        filename = f"speech_{ctx.message.id}.mp3"
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, tts.save, filename)
+        source = discord.FFmpegPCMAudio(filename)
+        ctx.voice_client.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
 
 @bot.command()
 async def ping(ctx):
-    logger.info(f'Ping command received from {ctx.author}')
     await ctx.send('Pong!')
 
 @bot.event
@@ -256,62 +247,62 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # Don't process AI responses for commands
     if message.content.startswith(bot.command_prefix):
         await bot.process_commands(message)
         return
 
-    # Check if the bot is mentioned or if it's a DM
     if bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         async with message.channel.typing():
-            # Extract URLs
+            # 1. Image Detection
+            images = []
+            for attachment in message.attachments:
+                if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp']):
+                    logger.info(f"Image found: {attachment.filename}")
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(attachment.url) as resp:
+                            if resp.status == 200:
+                                img_data = await resp.read()
+                                images.append(base64.b64encode(img_data).decode('utf-8'))
+
+            # 2. Extract URLs and clean prompt
             urls = re.findall(r'(https?://\S+)', message.content)
-            
             prompt = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
             
-            # 1. Search Intent Detection (e.g., "weather", "search", "who is")
-            if any(word in prompt.lower() for word in ["weather", "search", "who is", "what is"]):
-                logger.info(f"Search intent detected: {prompt}")
+            # 3. Decision Logic (Image > Search > URL > Text)
+            response = ""
+            if images:
+                logger.info("Using Vision Model")
+                response = await ask_ollama(prompt or "What is in this image?", channel_id=message.channel.id, images=images)
+            elif any(word in prompt.lower() for word in ["weather", "search", "who is", "what is"]):
                 search_results = await search_web(prompt)
-                prompt = f"I searched the web for your question and found these results:\n\n{search_results}\n\nBased on these results, please answer the user's question: {prompt}"
-            
-            # 2. URL Reading
+                prompt = f"I searched the web for your question and found these results:\n\n{search_results}\n\nBased on these results, please answer: {prompt}"
+                response = await ask_ollama(prompt, channel_id=message.channel.id)
             elif urls:
-                logger.info(f"URL(s) found in message: {urls}")
                 url_content = await read_url(urls[0])
-                prompt = f"Here is the text content from the URL ({urls[0]}):\n\n{url_content}\n\nUser Question/Instruction: {prompt if prompt else 'Summarize the content of this page.'}"
-
-            if not prompt:
-                prompt = "Hello!"
-
-            logger.info(f'Asking Ollama (with context): {prompt[:100]}...')
-            response = await ask_ollama(prompt, channel_id=message.channel.id)
+                prompt = f"URL content from {urls[0]}:\n\n{url_content}\n\nUser Instruction: {prompt or 'Summarize this page.'}"
+                response = await ask_ollama(prompt, channel_id=message.channel.id)
+            else:
+                response = await ask_ollama(prompt or "Hello!", channel_id=message.channel.id)
             
-            # If bot is in a voice channel, speak the response too
+            # 4. Handle Voice/TTS
             if message.guild and message.guild.voice_client:
-                # Use a separate task for TTS to not block message sending
                 try:
-                    # For voice, we might want to truncate if it's too long, but let's try the full text first
-                    tts = gTTS(text=response[:1000], lang='en') # Truncate TTS for performance
+                    tts_text = response[:1000]
+                    tts = gTTS(text=tts_text, lang='en')
                     filename = f"speech_{message.id}.mp3"
-                    
-                    # Run tts.save in a thread to not block the main loop
                     loop = asyncio.get_event_loop()
                     await loop.run_in_executor(None, tts.save, filename)
-                    
                     source = discord.FFmpegPCMAudio(filename)
                     message.guild.voice_client.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
                 except Exception as e:
                     logger.error(f"TTS Error: {e}")
             
-            # Split and send the response if it's too long
+            # 5. Split and Send
             if len(response) > 2000:
                 for i in range(0, len(response), 2000):
                     await message.channel.send(response[i:i+2000])
             else:
                 await message.channel.send(response)
-
-    await bot.process_commands(message)
 
 if __name__ == "__main__":
     if not DISCORD_TOKEN:
