@@ -4,6 +4,8 @@ import os
 import logging
 import aiohttp
 import json
+import re
+import wikipediaapi
 from gtts import gTTS
 import asyncio
 from dotenv import load_dotenv
@@ -18,6 +20,8 @@ load_dotenv(dotenv_path="deploy/base/.env")
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3')
+SCRAPER_URL = os.getenv('SCRAPER_URL', 'http://webscraper.webscraper-dev.svc.cluster.local/read')
+SEARCH_URL = os.getenv('SEARCH_URL', 'http://webscraper.webscraper-dev.svc.cluster.local/search')
 
 # Set up intents (permissions)
 intents = discord.Intents.default()
@@ -28,6 +32,41 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Memory storage (channel_id -> list of messages)
 memory = {}
+
+async def search_web(query):
+    """Calls the webscraper API to search the web for a query."""
+    params = {"q": query}
+    timeout = aiohttp.ClientTimeout(total=60)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(SEARCH_URL, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    results = data.get('results', [])
+                    # Format results for the LLM
+                    formatted_results = "\n".join([f"- {r['title']}: {r['body']} (Link: {r['href']})" for r in results[:3]])
+                    return formatted_results
+                else:
+                    return f"Error from search: {response.status}"
+    except Exception as e:
+        logger.error(f"Error calling search: {e}")
+        return f"Could not search right now. (Error: {e})"
+
+async def read_url(url):
+    """Calls the webscraper API to read a URL's text content."""
+    params = {"url": url}
+    timeout = aiohttp.ClientTimeout(total=60)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(SCRAPER_URL, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get('content', 'No content found.')
+                else:
+                    return f"Error from scraper: {response.status}"
+    except Exception as e:
+        logger.error(f"Error calling scraper: {e}")
+        return f"Could not reach my browser right now. (Error: {e})"
 
 async def ask_ollama(prompt, channel_id=None):
     # Initialize memory for the channel if it doesn't exist
@@ -103,6 +142,63 @@ async def on_resumed():
     logger.info("Bot has successfully resumed its session.")
 
 @bot.command()
+async def wiki(ctx, *, query: str):
+    """Searches Wikipedia for a summary of a topic."""
+    async with ctx.typing():
+        logger.info(f"Wikipedia search for: {query}")
+        wiki_wiki = wikipediaapi.Wikipedia(
+            user_agent="KelorBot/1.0 (wmcdonald@example.com)",
+            language='en'
+        )
+        page = wiki_wiki.page(query)
+        
+        if page.exists():
+            # Get the summary (truncated to 1500 chars for Discord)
+            summary = page.summary[:1500] + "..." if len(page.summary) > 1500 else page.summary
+            
+            embed = discord.Embed(title=page.title, url=page.fullurl, color=discord.Color.green())
+            embed.description = summary
+            embed.set_footer(text="Source: Wikipedia")
+            
+            await ctx.send(embed=embed)
+            logger.info(f"Found Wikipedia page for {query}")
+        else:
+            await ctx.send(f"I couldn't find a Wikipedia page for '{query}'.")
+
+@bot.command()
+async def track(ctx, url: str):
+    """Tracks the price of a LEGO set from a URL."""
+    if "lego.com" not in url.lower():
+        return await ctx.send("Please provide a valid LEGO.com URL.")
+
+    async with ctx.typing():
+        logger.info(f"Tracking LEGO URL: {url}")
+        params = {"url": url}
+        timeout = aiohttp.ClientTimeout(total=60)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # Use the scraper's /scrape endpoint specifically for LEGO
+                async with session.get(os.getenv('SCRAPER_BASE_URL', 'http://webscraper.webscraper-dev.svc.cluster.local') + '/scrape', params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        name = data.get('name', 'Unknown Set')
+                        prod_num = data.get('product_number', 'N/A')
+                        price = data.get('price', 'Price not found')
+                        
+                        embed = discord.Embed(title=f"LEGO Tracking: {name}", color=discord.Color.blue())
+                        embed.add_field(name="Product Number", value=prod_num, inline=True)
+                        embed.add_field(name="Current Price", value=f"${price}" if price != 'Price not found' else price, inline=True)
+                        embed.set_footer(text=f"URL: {url}")
+                        
+                        await ctx.send(embed=embed)
+                        logger.info(f"Tracked {name} (${price})")
+                    else:
+                        await ctx.send(f"Error from scraper: {response.status}")
+        except Exception as e:
+            logger.error(f"Error tracking LEGO: {e}")
+            await ctx.send(f"Could not reach my tracking tool right now. (Error: {e})")
+
+@bot.command()
 async def join(ctx):
     if ctx.author.voice:
         channel = ctx.author.voice.channel
@@ -168,11 +264,27 @@ async def on_message(message):
     # Check if the bot is mentioned or if it's a DM
     if bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         async with message.channel.typing():
+            # Extract URLs
+            urls = re.findall(r'(https?://\S+)', message.content)
+            
             prompt = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+            
+            # 1. Search Intent Detection (e.g., "weather", "search", "who is")
+            if any(word in prompt.lower() for word in ["weather", "search", "who is", "what is"]):
+                logger.info(f"Search intent detected: {prompt}")
+                search_results = await search_web(prompt)
+                prompt = f"I searched the web for your question and found these results:\n\n{search_results}\n\nBased on these results, please answer the user's question: {prompt}"
+            
+            # 2. URL Reading
+            elif urls:
+                logger.info(f"URL(s) found in message: {urls}")
+                url_content = await read_url(urls[0])
+                prompt = f"Here is the text content from the URL ({urls[0]}):\n\n{url_content}\n\nUser Question/Instruction: {prompt if prompt else 'Summarize the content of this page.'}"
+
             if not prompt:
                 prompt = "Hello!"
 
-            logger.info(f'Asking Ollama (with context): {prompt}')
+            logger.info(f'Asking Ollama (with context): {prompt[:100]}...')
             response = await ask_ollama(prompt, channel_id=message.channel.id)
             
             # If bot is in a voice channel, speak the response too
