@@ -31,10 +31,5 @@ patches:
     - op: add
       path: /spec/template/spec/containers/0/env/-
       value:
-        name: SCRAPER_URL
-        value: "http://dev-webscraper.webscraper-dev.svc.cluster.local/read"
-    - op: add
-      path: /spec/template/spec/containers/0/env/-
-      value:
-        name: SEARCH_URL
-        value: "http://dev-webscraper.webscraper-dev.svc.cluster.local/search"
+        name: SCRAPER_BASE_URL
+        value: "http://dev-webscraper.webscraper-dev.svc.cluster.local"

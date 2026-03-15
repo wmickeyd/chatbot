@@ -23,9 +23,11 @@ DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3')
 OLLAMA_VISION_MODEL = os.getenv('OLLAMA_VISION_MODEL', 'llava')
-SCRAPER_URL = os.getenv('SCRAPER_URL', 'http://dev-webscraper.webscraper-dev.svc.cluster.local/read')
-SEARCH_URL = os.getenv('SEARCH_URL', 'http://dev-webscraper.webscraper-dev.svc.cluster.local/search')
-TRACK_URL = os.getenv('TRACK_URL', 'http://dev-webscraper.webscraper-dev.svc.cluster.local/track')
+SCRAPER_BASE_URL = os.getenv('SCRAPER_BASE_URL', 'http://dev-webscraper.webscraper-dev.svc.cluster.local')
+SCRAPER_URL = f"{SCRAPER_BASE_URL}/read"
+SEARCH_URL = f"{SCRAPER_BASE_URL}/search"
+TRACK_URL = f"{SCRAPER_BASE_URL}/track"
+SCRAPE_URL = f"{SCRAPER_BASE_URL}/scrape"
 
 # Set up intents (permissions)
 intents = discord.Intents.default()
@@ -81,7 +83,7 @@ async def ask_ollama(prompt, channel_id=None, images=None):
     model = OLLAMA_VISION_MODEL if images else OLLAMA_MODEL
 
     # Construct the full prompt with context
-    system_instruction = "You are Kelor, a helpful AI assistant with REAL-TIME access to the internet via search tools. Never say you don't have internet access. If search results are provided, use them to answer directly. Be concise and conversational."
+    system_instruction = "You are Kelor. Use provided search results to answer questions CONCISELY (2-3 sentences max). If you have a specific link from the search results, you may provide it. If no specific info is found, say so. Do not hallucinate links or access."
     context_prompt = f"SYSTEM: {system_instruction}\n"
     if channel_id and not images: # History is mostly useful for text chat
         for msg in memory[channel_id]:
@@ -91,37 +93,41 @@ async def ask_ollama(prompt, channel_id=None, images=None):
     payload = {
         "model": model,
         "prompt": context_prompt,
-        "stream": False
+        "stream": True
     }
     
     if images:
         payload["images"] = images
 
-    timeout = aiohttp.ClientTimeout(total=60) # 1 minute timeout
+    timeout = aiohttp.ClientTimeout(total=120) # Increased timeout for streaming
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(OLLAMA_URL, json=payload) as response:
                 if response.status == 200:
-                    data = await response.json()
-                    ai_response = data.get('response', 'Sorry, I couldn\'t get a response from Ollama.')
-                    
-                    # Update memory (only for text chat)
-                    if channel_id and not images:
-                        memory[channel_id].append({"role": "user", "content": prompt})
-                        memory[channel_id].append({"role": "assistant", "content": ai_response})
-                        if len(memory[channel_id]) > 10:
-                            memory[channel_id] = memory[channel_id][-10:]
-                    
-                    return ai_response
+                    full_response = ""
+                    async for line in response.content:
+                        if line:
+                            data = json.loads(line.decode('utf-8'))
+                            chunk = data.get('response', '')
+                            full_response += chunk
+                            yield chunk
+                            if data.get('done'):
+                                # Update memory (only for text chat)
+                                if channel_id and not images:
+                                    memory[channel_id].append({"role": "user", "content": prompt})
+                                    memory[channel_id].append({"role": "assistant", "content": full_response})
+                                    if len(memory[channel_id]) > 10:
+                                        memory[channel_id] = memory[channel_id][-10:]
+                                break
                 else:
                     logger.error(f"Ollama error: {response.status}")
-                    return f"Error: Ollama returned status {response.status}"
+                    yield f"Error: Ollama returned status {response.status}"
     except asyncio.TimeoutError:
-        logger.error("Ollama request timed out after 60 seconds.")
-        return "Ollama is taking too long to respond. Please try again in a moment."
+        logger.error("Ollama request timed out.")
+        yield "Ollama is taking too long to respond."
     except Exception as e:
         logger.error(f"Error calling Ollama: {e}")
-        return "Sorry, I'm having trouble connecting to my brain right now."
+        yield "Sorry, I'm having trouble connecting to my brain right now."
 
 @bot.event
 async def on_ready():
@@ -196,7 +202,7 @@ async def track(ctx, url: str):
         timeout = aiohttp.ClientTimeout(total=60)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(os.getenv('SCRAPER_BASE_URL', 'http://webscraper.webscraper-dev.svc.cluster.local') + '/scrape', params=params) as response:
+                async with session.get(SCRAPE_URL, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
                         name = data.get('name', 'Unknown Set')
@@ -286,26 +292,75 @@ async def on_message(message):
             logger.info(f"Processing prompt: '{prompt}'")
             
             # 3. Decision Logic (Image > Search > URL > Text)
-            response = ""
+            response_chunks = []
+            msg_to_edit = None
+            last_update_time = 0
+            
             if images:
                 logger.info("Using Vision Model")
-                response = await ask_ollama(prompt or "What is in this image?", channel_id=message.channel.id, images=images)
+                async for chunk in ask_ollama(prompt or "What is in this image?", channel_id=message.channel.id, images=images):
+                    response_chunks.append(chunk)
+                    full_text = "".join(response_chunks)
+                    if not msg_to_edit:
+                        msg_to_edit = await message.channel.send(full_text[:2000] if full_text else "...")
+                    elif (datetime.now().timestamp() - last_update_time) > 1.5:
+                        await msg_to_edit.edit(content=full_text[:2000])
+                        last_update_time = datetime.now().timestamp()
+                response = "".join(response_chunks)
+                if msg_to_edit: await msg_to_edit.edit(content=response[:2000])
+
             elif any(word in prompt.lower() for word in ["weather", "search", "who is", "what is", "how is", "current"]):
                 logger.info(f"Triggering web search for: {prompt}")
-                search_results = await search_web(prompt)
-                if "Error from search" in search_results or "Could not search right now" in search_results:
-                    response = f"I'm sorry, I tried to search for that but I'm having trouble connecting to my web browser right now. {search_results}"
+                search_results_raw = await search_web(prompt)
+                
+                # If it's a weather search, try to 'read' the first result for better data
+                deep_context = ""
+                urls_found = re.findall(r'Link: (https?://[^\s\)]+)', search_results_raw)
+                if urls_found and ("weather" in prompt.lower() or "how is" in prompt.lower()):
+                    logger.info(f"Deep scraping the first search result: {urls_found[0]}")
+                    deep_context = await read_url(urls_found[0])
+                
+                if "Error from search" in search_results_raw or "Could not search right now" in search_results_raw:
+                    response = f"I'm sorry, I tried to search for that but I'm having trouble connecting to my web browser right now. {search_results_raw}"
+                    await message.channel.send(response)
                 else:
                     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    prompt = f"SYSTEM: Use the following REAL-TIME search results to answer the user's question. If the information is here, do NOT say you don't have access to the internet. \n\nCurrent Time: {current_time}\n\nSearch Results:\n{search_results}\n\nUser Question: {prompt}"
-                    logger.info("Sending search results to Ollama")
-                    response = await ask_ollama(prompt, channel_id=message.channel.id)
+                    prompt = f"SYSTEM: Use the following search results and deep scrape data to answer. \n\nCurrent Time: {current_time}\n\nSearch Snippets:\n{search_results_raw}\n\nDeep Scrape Data:\n{deep_context[:2000]}\n\nUser Question: {prompt}"
+                    logger.info("Sending enriched search results to Ollama")
+                    async for chunk in ask_ollama(prompt, channel_id=message.channel.id):
+                        response_chunks.append(chunk)
+                        full_text = "".join(response_chunks)
+                        if not msg_to_edit:
+                            msg_to_edit = await message.channel.send(full_text[:2000] if full_text else "...")
+                        elif (datetime.now().timestamp() - last_update_time) > 1.5:
+                            await msg_to_edit.edit(content=full_text[:2000])
+                            last_update_time = datetime.now().timestamp()
+                    response = "".join(response_chunks)
+                    if msg_to_edit: await msg_to_edit.edit(content=response[:2000])
             elif urls:
                 url_content = await read_url(urls[0])
                 prompt = f"URL content from {urls[0]}:\n\n{url_content}\n\nUser Instruction: {prompt or 'Summarize this page.'}"
-                response = await ask_ollama(prompt, channel_id=message.channel.id)
+                async for chunk in ask_ollama(prompt, channel_id=message.channel.id):
+                    response_chunks.append(chunk)
+                    full_text = "".join(response_chunks)
+                    if not msg_to_edit:
+                        msg_to_edit = await message.channel.send(full_text[:2000] if full_text else "...")
+                    elif (datetime.now().timestamp() - last_update_time) > 1.5:
+                        await msg_to_edit.edit(content=full_text[:2000])
+                        last_update_time = datetime.now().timestamp()
+                response = "".join(response_chunks)
+                if msg_to_edit: await msg_to_edit.edit(content=response[:2000])
             else:
-                response = await ask_ollama(prompt or "Hello!", channel_id=message.channel.id)
+                async for chunk in ask_ollama(prompt or "Hello!", channel_id=message.channel.id):
+                    response_chunks.append(chunk)
+                    full_text = "".join(response_chunks)
+                    if not msg_to_edit:
+                        msg_to_edit = await message.channel.send(full_text[:2000] if full_text else "...")
+                    elif (datetime.now().timestamp() - last_update_time) > 1.5:
+                        await msg_to_edit.edit(content=full_text[:2000])
+                        last_update_time = datetime.now().timestamp()
+                response = "".join(response_chunks)
+                if msg_to_edit: await msg_to_edit.edit(content=response[:2000])
             
             # 4. Handle Voice/TTS
             if message.guild and message.guild.voice_client:
@@ -320,12 +375,31 @@ async def on_message(message):
                 except Exception as e:
                     logger.error(f"TTS Error: {e}")
             
-            # 5. Split and Send
+            # 5. Handle Large Responses (Remainder)
             if len(response) > 2000:
-                for i in range(0, len(response), 2000):
-                    await message.channel.send(response[i:i+2000])
-            else:
-                await message.channel.send(response)
+                remainder = response[2000:]
+                parts = remainder.split('\n\n')
+                current_message = ""
+                for part in parts:
+                    if len(current_message) + len(part) + 2 <= 2000:
+                        current_message += (part + '\n\n')
+                    else:
+                        if current_message:
+                            await message.channel.send(current_message.strip())
+                        if len(part) > 2000:
+                            sentences = re.split(r'(?<=[.!?])\s+', part)
+                            sentence_msg = ""
+                            for s in sentences:
+                                if len(sentence_msg) + len(s) + 1 <= 2000:
+                                    sentence_msg += (s + ' ')
+                                else:
+                                    await message.channel.send(sentence_msg.strip())
+                                    sentence_msg = s + ' '
+                            current_message = sentence_msg
+                        else:
+                            current_message = part + '\n\n'
+                if current_message:
+                    await message.channel.send(current_message.strip())
 
 if __name__ == "__main__":
     if not DISCORD_TOKEN:
