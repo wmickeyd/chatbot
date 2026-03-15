@@ -295,7 +295,9 @@ async def on_message(message):
                 if "Error from search" in search_results or "Could not search right now" in search_results:
                     response = f"I'm sorry, I tried to search for that but I'm having trouble connecting to my web browser right now. {search_results}"
                 else:
-                    prompt = f"I searched the web for your question and found these results:\n\n{search_results}\n\nBased on these results, please answer: {prompt}"
+                    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    prompt = f"SYSTEM: Use the following REAL-TIME search results to answer the user's question. If the information is here, do NOT say you don't have access to the internet. \n\nCurrent Time: {current_time}\n\nSearch Results:\n{search_results}\n\nUser Question: {prompt}"
+                    logger.info("Sending search results to Ollama")
                     response = await ask_ollama(prompt, channel_id=message.channel.id)
             elif urls:
                 url_content = await read_url(urls[0])
