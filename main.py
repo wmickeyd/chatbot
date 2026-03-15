@@ -23,7 +23,7 @@ OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3')
 OLLAMA_VISION_MODEL = os.getenv('OLLAMA_VISION_MODEL', 'llava')
 SCRAPER_URL = os.getenv('SCRAPER_URL', 'http://webscraper.webscraper-dev.svc.cluster.local/read')
-SEARCH_URL = os.getenv('SEARCH_URL', 'http://webscraper.webscraper-dev.svc.cluster.local/search')
+TRACK_URL = os.getenv('TRACK_URL', 'http://dev-webscraper.webscraper-dev.svc.cluster.local/track')
 
 # Set up intents (permissions)
 intents = discord.Intents.default()
@@ -275,8 +275,11 @@ async def on_message(message):
                 response = await ask_ollama(prompt or "What is in this image?", channel_id=message.channel.id, images=images)
             elif any(word in prompt.lower() for word in ["weather", "search", "who is", "what is"]):
                 search_results = await search_web(prompt)
-                prompt = f"I searched the web for your question and found these results:\n\n{search_results}\n\nBased on these results, please answer: {prompt}"
-                response = await ask_ollama(prompt, channel_id=message.channel.id)
+                if "Error from search" in search_results or "Could not search right now" in search_results:
+                    response = f"I'm sorry, I tried to search for that but I'm having trouble connecting to my web browser right now. {search_results}"
+                else:
+                    prompt = f"I searched the web for your question and found these results:\n\n{search_results}\n\nBased on these results, please answer: {prompt}"
+                    response = await ask_ollama(prompt, channel_id=message.channel.id)
             elif urls:
                 url_content = await read_url(urls[0])
                 prompt = f"URL content from {urls[0]}:\n\n{url_content}\n\nUser Instruction: {prompt or 'Summarize this page.'}"
