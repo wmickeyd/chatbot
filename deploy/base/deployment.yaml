@@ -30,6 +30,14 @@ spec:
           requests:
             cpu: "100m"
             memory: "128Mi"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - find /tmp/health -mmin -2 | grep /tmp/health
+          initialDelaySeconds: 30
+          periodSeconds: 60
         env:
         - name: DISCORD_TOKEN
           valueFrom:

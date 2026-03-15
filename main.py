@@ -9,6 +9,7 @@ import base64
 import wikipediaapi
 from gtts import gTTS
 import asyncio
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Set up logging
@@ -126,6 +127,9 @@ async def on_ready():
     logger.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
     logger.info(f'Using Ollama models: {OLLAMA_MODEL} (Text) and {OLLAMA_VISION_MODEL} (Vision)')
     
+    # Start health check background task
+    bot.loop.create_task(update_health_check())
+
     # Check for voice support
     try:
         import nacl
@@ -141,6 +145,16 @@ async def on_ready():
         logger.error(f"Failed to load Opus: {e}")
 
     logger.info('------')
+
+async def update_health_check():
+    """Background task to update a health check file while the bot is alive."""
+    while not bot.is_closed():
+        try:
+            with open("/tmp/health", "w") as f:
+                f.write(str(datetime.now()))
+        except Exception as e:
+            logger.error(f"Error updating health check: {e}")
+        await asyncio.sleep(30)
 
 @bot.event
 async def on_disconnect():
@@ -267,14 +281,16 @@ async def on_message(message):
 
             # 2. Extract URLs and clean prompt
             urls = re.findall(r'(https?://\S+)', message.content)
-            prompt = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+            prompt = re.sub(f'<@!?{bot.user.id}>', '', message.content).strip()
+            logger.info(f"Processing prompt: '{prompt}'")
             
             # 3. Decision Logic (Image > Search > URL > Text)
             response = ""
             if images:
                 logger.info("Using Vision Model")
                 response = await ask_ollama(prompt or "What is in this image?", channel_id=message.channel.id, images=images)
-            elif any(word in prompt.lower() for word in ["weather", "search", "who is", "what is"]):
+            elif any(word in prompt.lower() for word in ["weather", "search", "who is", "what is", "how is", "current"]):
+                logger.info(f"Triggering web search for: {prompt}")
                 search_results = await search_web(prompt)
                 if "Error from search" in search_results or "Could not search right now" in search_results:
                     response = f"I'm sorry, I tried to search for that but I'm having trouble connecting to my web browser right now. {search_results}"
