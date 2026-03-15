@@ -81,7 +81,8 @@ async def ask_ollama(prompt, channel_id=None, images=None):
     model = OLLAMA_VISION_MODEL if images else OLLAMA_MODEL
 
     # Construct the full prompt with context
-    context_prompt = ""
+    system_instruction = "You are Kelor, a helpful AI assistant with REAL-TIME access to the internet via search tools. Never say you don't have internet access. If search results are provided, use them to answer directly. Be concise and conversational."
+    context_prompt = f"SYSTEM: {system_instruction}\n"
     if channel_id and not images: # History is mostly useful for text chat
         for msg in memory[channel_id]:
             context_prompt += f"{msg['role']}: {msg['content']}\n"
@@ -291,13 +292,21 @@ async def on_message(message):
                 response = await ask_ollama(prompt or "What is in this image?", channel_id=message.channel.id, images=images)
             elif any(word in prompt.lower() for word in ["weather", "search", "who is", "what is", "how is", "current"]):
                 logger.info(f"Triggering web search for: {prompt}")
-                search_results = await search_web(prompt)
-                if "Error from search" in search_results or "Could not search right now" in search_results:
-                    response = f"I'm sorry, I tried to search for that but I'm having trouble connecting to my web browser right now. {search_results}"
+                search_results_raw = await search_web(prompt)
+                
+                # If it's a weather search, try to 'read' the first result for better data
+                deep_context = ""
+                urls_found = re.findall(r'Link: (https?://\S+)', search_results_raw)
+                if urls_found and ("weather" in prompt.lower() or "how is" in prompt.lower()):
+                    logger.info(f"Deep scraping the first search result: {urls_found[0]}")
+                    deep_context = await read_url(urls_found[0])
+                
+                if "Error from search" in search_results_raw or "Could not search right now" in search_results_raw:
+                    response = f"I'm sorry, I tried to search for that but I'm having trouble connecting to my web browser right now. {search_results_raw}"
                 else:
                     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    prompt = f"SYSTEM: Use the following REAL-TIME search results to answer the user's question. If the information is here, do NOT say you don't have access to the internet. \n\nCurrent Time: {current_time}\n\nSearch Results:\n{search_results}\n\nUser Question: {prompt}"
-                    logger.info("Sending search results to Ollama")
+                    prompt = f"SYSTEM: Use the following search results and deep scrape data to answer. \n\nCurrent Time: {current_time}\n\nSearch Snippets:\n{search_results_raw}\n\nDeep Scrape Data:\n{deep_context[:2000]}\n\nUser Question: {prompt}"
+                    logger.info("Sending enriched search results to Ollama")
                     response = await ask_ollama(prompt, channel_id=message.channel.id)
             elif urls:
                 url_content = await read_url(urls[0])
