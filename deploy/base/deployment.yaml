@@ -16,6 +16,7 @@ spec:
       labels:
         app: chatbot
     spec:
+      terminationGracePeriodSeconds: 5
       imagePullSecrets:
       - name: regcred
       containers:
