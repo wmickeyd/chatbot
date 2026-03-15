@@ -285,9 +285,39 @@ async def wiki(ctx, *, query: str):
 @bot.command()
 async def track(ctx, url: str):
     """Tracks the price of a LEGO set from a URL."""
+    logger.info(f"Received !track command from {ctx.author}: {url}")
     async with ctx.typing():
         result = await track_lego_logic(url)
+        logger.info(f"!track command completed for {ctx.author}: {result}")
         await ctx.send(result)
+
+@bot.command()
+async def tracked(ctx):
+    """Lists all LEGO sets currently being tracked."""
+    logger.info(f"Received !tracked command from {ctx.author}")
+    async with ctx.typing():
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{SCRAPER_BASE_URL}/tracked") as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if not data:
+                            return await ctx.send("Not tracking any LEGO sets yet.")
+                        
+                        embed = discord.Embed(title="Currently Tracked LEGO Sets", color=discord.Color.gold())
+                        for item in data:
+                            price = f"${item['latest_price']}" if item['latest_price'] else "Unknown"
+                            embed.add_field(
+                                name=f"{item['name']} ({item['product_number']})",
+                                value=f"Price: {price}\n[Link]({item['url']})",
+                                inline=False
+                            )
+                        await ctx.send(embed=embed)
+                    else:
+                        await ctx.send(f"Error fetching tracked sets: {response.status}")
+        except Exception as e:
+            logger.error(f"Error in !tracked command: {e}")
+            await ctx.send("Could not reach the tracking database.")
 
 @bot.command()
 async def join(ctx):
