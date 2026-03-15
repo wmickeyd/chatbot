@@ -245,11 +245,15 @@ async def on_ready():
     logger.info('------')
 
 async def update_health_check():
-    """Background task to update a health check file while the bot is alive."""
+    """Background task to update a health check file while the bot is connected and ready."""
     while not bot.is_closed():
         try:
-            with open("/tmp/health", "w") as f:
-                f.write(str(datetime.now()))
+            # Only touch the health file if the bot is actually connected AND ready
+            if bot.is_ready():
+                with open("/tmp/health", "w") as f:
+                    f.write(str(datetime.now()))
+            else:
+                logger.warning("Bot is alive but not ready. Skipping health check update.")
         except Exception as e:
             logger.error(f"Error updating health check: {e}")
         await asyncio.sleep(30)
