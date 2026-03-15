@@ -34,7 +34,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 # Define bot prefix
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents, heartbeat_timeout=120.0)
 
 # Memory storage (channel_id -> list of messages)
 memory = {}
@@ -271,15 +271,24 @@ async def wiki(ctx, *, query: str):
     """Searches Wikipedia for a summary of a topic."""
     async with ctx.typing():
         logger.info(f"Wikipedia search for: {query}")
-        wiki_wiki = wikipediaapi.Wikipedia(
-            user_agent="KelorBot/1.0 (wmcdonald@example.com)",
-            language='en'
-        )
-        page = wiki_wiki.page(query)
         
-        if page.exists():
-            summary = page.summary[:1500] + "..." if len(page.summary) > 1500 else page.summary
-            embed = discord.Embed(title=page.title, url=page.fullurl, color=discord.Color.green())
+        def fetch_wiki():
+            wiki_wiki = wikipediaapi.Wikipedia(
+                user_agent="KelorBot/1.0 (wmcdonald@example.com)",
+                language='en'
+            )
+            page = wiki_wiki.page(query)
+            if page.exists():
+                return {"title": page.title, "url": page.fullurl, "summary": page.summary}
+            return None
+
+        # Run the blocking fetch in a thread
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, fetch_wiki)
+        
+        if result:
+            summary = result["summary"][:1500] + "..." if len(result["summary"]) > 1500 else result["summary"]
+            embed = discord.Embed(title=result["title"], url=result["url"], color=discord.Color.green())
             embed.description = summary
             embed.set_footer(text="Source: Wikipedia")
             await ctx.send(embed=embed)

@@ -17,6 +17,12 @@ spec:
         app: chatbot
     spec:
       terminationGracePeriodSeconds: 5
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      dnsConfig:
+        nameservers:
+          - 1.1.1.1
+          - 8.8.8.8
       imagePullSecrets:
       - name: regcred
       containers:
