@@ -198,8 +198,9 @@ async def ask_ollama(prompt, channel_id=None, images=None, system_override=None,
     if current_messages:
         messages = current_messages
     else:
+        current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
         system_instruction = system_override or (
-            "You are Kelor, a utility assistant with REAL-TIME access to the web. "
+            f"You are Kelor, a utility assistant with REAL-TIME access to the web. Current time is {current_time}. "
             "You MUST use tools for any factual query (population, weather, news). "
             "NEVER say you don't have access to information; instead, call a tool to find it. "
             "Only mention a source if you include the actual URL in your response."
