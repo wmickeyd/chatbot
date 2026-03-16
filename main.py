@@ -76,7 +76,9 @@ async def read_url(url):
             async with session.get(SCRAPER_URL, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data.get('content', 'No content found.')
+                    content = data.get('content', 'No content found.')
+                    # Prepend URL to content so LLM knows where it came from
+                    return f"SOURCE URL: {url}\n\nCONTENT:\n{content}"
                 else:
                     return f"Error from scraper: {response.status}"
     except Exception as e:
@@ -166,8 +168,9 @@ async def ask_ollama(prompt, channel_id=None, images=None, system_override=None,
         messages = current_messages
     else:
         system_instruction = system_override or (
-            "You are Kelor, a helpful AI assistant. Use tools if you need to find factual information (weather, news, prices). "
-            "If you have the answer, state it clearly and concisely. Never guess numbers."
+            "You are Kelor, a helpful AI assistant. Use tools for factual info (weather, news, prices). "
+            "If you have the answer, state it clearly and concisely. Never guess numbers. "
+            "IMPORTANT: Only mention a link or source if you include the actual full URL in your response."
         )
         messages.append({"role": "system", "content": system_instruction})
         
@@ -458,12 +461,12 @@ async def on_message(message):
                             found_tool_call = True
                             active_messages = chunk_data["messages"]
                             active_messages.append({"role": "assistant", "tool_calls": chunk_data["calls"]})
-                            
+
                             for call in chunk_data["calls"]:
                                 func_name = call["function"]["name"]
                                 args = call["function"]["arguments"]
                                 logger.info(f"Turn {turn}: Bot calling tool {func_name} with {args}")
-                                
+
                                 tool_result = ""
                                 if func_name == "search_web":
                                     tool_result = await search_web(args.get("query"))
@@ -471,18 +474,28 @@ async def on_message(message):
                                     tool_result = await read_url(args.get("url"))
                                 elif func_name == "track_lego_set":
                                     tool_result = await track_lego_logic(args.get("url"))
-                                
+
+                                # Add tool result to history
                                 active_messages.append({
                                     "role": "tool",
                                     "content": str(tool_result),
                                     "name": func_name
                                 })
-                                logger.info(f"Tool {func_name} result: {str(tool_result)[:100]}...")
-                            
+                                logger.info(f"Turn {turn}: Tool {func_name} result received.")
+
+                                # Store URLs for final appending if needed
+                                if func_name == "search_web":
+                                    found_urls = re.findall(r'Link: (https?://\S+)', str(tool_result))
+                                    if found_urls:
+                                        response_text += f"\n\nSource: {found_urls[0]}"
+                                elif func_name == "read_url" or func_name == "track_lego_set":
+                                    found_urls = re.findall(r'https?://\S+', str(tool_result))
+                                    if found_urls:
+                                        response_text += f"\n\nSource: {found_urls[0]}"
+
                             # After processing tools, we loop back to ask_ollama
                             active_prompt = None
-                            break
-                    
+                            break                    
                     if not found_tool_call:
                         break # Bot is done thinking, move to final response
             except Exception as e:
