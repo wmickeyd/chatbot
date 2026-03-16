@@ -9,6 +9,7 @@ import base64
 import wikipediaapi
 from gtts import gTTS
 import asyncio
+import numexpr
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -143,6 +144,17 @@ async def search_images(query):
         logger.error(f"Error calling image search: {e}")
         return f"Could not search for images. (Error: {e})"
 
+async def calculate_logic(expression):
+    """Evaluates a mathematical expression using numexpr safely."""
+    try:
+        # numexpr.evaluate is relatively safe for numerical expressions
+        result = numexpr.evaluate(expression)
+        # Convert result (which might be a numpy array or single value) to string
+        return str(result)
+    except Exception as e:
+        logger.error(f"Error evaluating math: {e}")
+        return f"Could not calculate '{expression}'. (Error: {e})"
+
 # Tool Definitions for Ollama
 TOOLS = [
     {
@@ -198,6 +210,20 @@ TOOLS = [
                     "url": {"type": "string", "description": "The full URL to read."}
                 },
                 "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": "Perform advanced mathematical calculations or evaluate numerical expressions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {"type": "string", "description": "The mathematical expression to evaluate (e.g., '2 + 2', 'sqrt(16) * sin(pi/2)')."}
+                },
+                "required": ["expression"]
             }
         }
     },
@@ -460,6 +486,14 @@ async def speak(ctx, *, text=None):
         source = discord.FFmpegPCMAudio(filename)
         ctx.voice_client.play(source, after=lambda e: os.remove(filename) if os.path.exists(filename) else None)
 
+@bot.command(aliases=['wolfram'])
+async def calc(ctx, *, expression: str):
+    """Evaluates a mathematical expression (Advanced Calculator)."""
+    async with ctx.typing():
+        logger.info(f"Calc command for: {expression}")
+        result = await calculate_logic(expression)
+        await ctx.send(f"**Result:** `{result}`")
+
 @bot.command()
 async def ping(ctx):
     await ctx.send('Pong!')
@@ -542,8 +576,12 @@ async def on_message(message):
                                     tool_result = await track_lego_logic(args.get("url"))
                                 elif func_name == "get_stock_crypto_price":
                                     tool_result = await get_finance_data(args.get("symbol"))
+                                elif func_name == "calculate":
+                                    tool_result = await calculate_logic(args.get("expression"))
                                 elif func_name == "search_images":
-                                    tool_result = await search_images(args.get("query"))                                # Add tool result to history
+                                    tool_result = await search_images(args.get("query"))
+                                
+                                # Add tool result to history
                                 active_messages.append({
                                     "role": "tool",
                                     "content": str(tool_result),
