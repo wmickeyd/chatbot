@@ -166,13 +166,8 @@ async def ask_ollama(prompt, channel_id=None, images=None, system_override=None,
         messages = current_messages
     else:
         system_instruction = system_override or (
-            "You are Kelor, a highly accurate utility assistant. "
-            "STRICT RULES:\n"
-            "1. For ANY factual question, you MUST use a tool.\n"
-            "2. NEVER guess numbers. If a tool fails, say 'I couldn't find that info.'\n"
-            "3. If you mention a source or a link, you MUST include the actual URL from the search results in your text.\n"
-            "4. Never say 'I provided a link' unless the URL is visible in your current response.\n"
-            "5. Be concise (1-3 sentences)."
+            "You are Kelor, a helpful AI assistant. Use tools if you need to find factual information (weather, news, prices). "
+            "If you have the answer, state it clearly and concisely. Never guess numbers."
         )
         messages.append({"role": "system", "content": system_instruction})
         
@@ -501,13 +496,13 @@ async def on_message(message):
             if msg_to_edit:
                 # If we were already streaming, do one final edit to ensure it's complete
                 await msg_to_edit.edit(content=response_text[:2000])
-                logger.info(f"Response (streamed) sent to {message.author}")
+                logger.info(f"Streamed response completed for {message.author}")
             else:
                 # If the message was small (under 100 chars), it never triggered msg_to_edit. 
                 # Send it now as a fresh, single message.
                 if response_text.strip():
                     await message.channel.send(response_text[:2000])
-                    logger.info(f"Response (single) sent to {message.author}: {response_text.strip()}")
+                    logger.info(f"Single response sent to {message.author}")
                 else:
                     await message.channel.send("I couldn't find a clear answer.")
                     logger.warning(f"Empty response generated for {message.author}")
