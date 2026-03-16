@@ -28,6 +28,7 @@ SCRAPER_URL = f"{SCRAPER_BASE_URL}/read"
 SEARCH_URL = f"{SCRAPER_BASE_URL}/search"
 TRACK_URL = f"{SCRAPER_BASE_URL}/track"
 SCRAPE_URL = f"{SCRAPER_BASE_URL}/scrape"
+FINANCE_URL = f"{SCRAPER_BASE_URL}/finance"
 
 # Set up intents (permissions)
 intents = discord.Intents.default()
@@ -107,8 +108,38 @@ async def track_lego_logic(url):
         logger.error(f"Error tracking LEGO: {e}")
         return f"Could not reach tracking tool. Error: {e}"
 
+async def get_finance_data(symbol):
+    """Calls the webscraper API to get stock or crypto prices."""
+    params = {"symbol": symbol}
+    timeout = aiohttp.ClientTimeout(total=60)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(FINANCE_URL, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return f"Ticker: {data['symbol']}, Name: {data['name']}, Price: {data['price']} {data['currency']}"
+                else:
+                    return f"Error from finance tool: {response.status}"
+    except Exception as e:
+        logger.error(f"Error calling finance: {e}")
+        return f"Could not get financial data. (Error: {e})"
+
 # Tool Definitions for Ollama
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stock_crypto_price",
+            "description": "Get the real-time price of a stock (e.g. AAPL, GOOGL) or crypto (e.g. BTC-USD, ETH-USD).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "The ticker symbol."}
+                },
+                "required": ["symbol"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -168,9 +199,10 @@ async def ask_ollama(prompt, channel_id=None, images=None, system_override=None,
         messages = current_messages
     else:
         system_instruction = system_override or (
-            "You are Kelor, a helpful AI assistant. Use tools for factual info (weather, news, prices). "
-            "If you have the answer, state it clearly and concisely. Never guess numbers. "
-            "IMPORTANT: Only mention a link or source if you include the actual full URL in your response."
+            "You are Kelor, a utility assistant with REAL-TIME access to the web. "
+            "You MUST use tools for any factual query (population, weather, news). "
+            "NEVER say you don't have access to information; instead, call a tool to find it. "
+            "Only mention a source if you include the actual URL in your response."
         )
         messages.append({"role": "system", "content": system_instruction})
         
@@ -474,7 +506,8 @@ async def on_message(message):
                                     tool_result = await read_url(args.get("url"))
                                 elif func_name == "track_lego_set":
                                     tool_result = await track_lego_logic(args.get("url"))
-
+                                elif func_name == "get_stock_crypto_price":
+                                    tool_result = await get_finance_data(args.get("symbol"))
                                 # Add tool result to history
                                 active_messages.append({
                                     "role": "tool",
