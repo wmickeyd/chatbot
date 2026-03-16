@@ -229,12 +229,13 @@ async def ask_ollama(prompt, channel_id=None, images=None, system_override=None,
                     if tool_calls:
                         yield {"type": "tool_calls", "calls": tool_calls, "messages": messages}
                     else:
-                        # Update memory
+                        # Only update memory on final response
                         if channel_id and not images:
-                            memory[channel_id].append({"role": "user", "content": prompt or "Follow-up question"})
+                            memory[channel_id].append({"role": "user", "content": prompt or "Follow-up"})
                             memory[channel_id].append({"role": "assistant", "content": full_response_content})
                             if len(memory[channel_id]) > 10:
                                 memory[channel_id] = memory[channel_id][-10:]
+                            logger.info(f"Memory updated for channel {channel_id}")
                 else:
                     logger.error(f"Ollama error: {response.status}")
                     yield {"type": "content", "content": f"Error: Ollama returned status {response.status}"}
@@ -452,6 +453,7 @@ async def on_message(message):
 
                             if chunk.strip(): # Only send if there's actual text
                                 if not msg_to_edit:
+                                    logger.info(f"Response exceeded buffer, starting stream for {message.author}")
                                     msg_to_edit = await message.channel.send(response_text[:2000])
                                 elif (datetime.now().timestamp() - last_update_time) > 1.5:
                                     await msg_to_edit.edit(content=response_text[:2000])
@@ -480,6 +482,7 @@ async def on_message(message):
                                     "content": str(tool_result),
                                     "name": func_name
                                 })
+                                logger.info(f"Tool {func_name} result: {str(tool_result)[:100]}...")
                             
                             # After processing tools, we loop back to ask_ollama
                             active_prompt = None
@@ -496,10 +499,18 @@ async def on_message(message):
                     await message.channel.send(error_msg)
             
             if msg_to_edit:
+                # If we were already streaming, do one final edit to ensure it's complete
                 await msg_to_edit.edit(content=response_text[:2000])
+                logger.info(f"Response (streamed) sent to {message.author}")
             else:
-                if not response_text:
+                # If the message was small (under 100 chars), it never triggered msg_to_edit. 
+                # Send it now as a fresh, single message.
+                if response_text.strip():
+                    await message.channel.send(response_text[:2000])
+                    logger.info(f"Response (single) sent to {message.author}: {response_text.strip()}")
+                else:
                     await message.channel.send("I couldn't find a clear answer.")
+                    logger.warning(f"Empty response generated for {message.author}")
             
             # 4. Handle Voice/TTS
             if response_text and message.guild and message.guild.voice_client:
