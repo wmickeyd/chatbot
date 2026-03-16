@@ -29,6 +29,7 @@ SEARCH_URL = f"{SCRAPER_BASE_URL}/search"
 TRACK_URL = f"{SCRAPER_BASE_URL}/track"
 SCRAPE_URL = f"{SCRAPER_BASE_URL}/scrape"
 FINANCE_URL = f"{SCRAPER_BASE_URL}/finance"
+IMAGE_SEARCH_URL = f"{SCRAPER_BASE_URL}/image_search"
 
 # Set up intents (permissions)
 intents = discord.Intents.default()
@@ -124,8 +125,40 @@ async def get_finance_data(symbol):
         logger.error(f"Error calling finance: {e}")
         return f"Could not get financial data. (Error: {e})"
 
+async def search_images(query):
+    """Calls the webscraper API to search for images."""
+    params = {"q": query}
+    timeout = aiohttp.ClientTimeout(total=60)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(IMAGE_SEARCH_URL, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    results = data.get('results', [])
+                    formatted = "\n".join([f"- {r['title']}: {r['image']}" for r in results])
+                    return formatted or "No images found."
+                else:
+                    return f"Error from image search: {response.status}"
+    except Exception as e:
+        logger.error(f"Error calling image search: {e}")
+        return f"Could not search for images. (Error: {e})"
+
 # Tool Definitions for Ollama
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_images",
+            "description": "Search the web for images and return their URLs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The image search query."}
+                },
+                "required": ["query"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -509,7 +542,8 @@ async def on_message(message):
                                     tool_result = await track_lego_logic(args.get("url"))
                                 elif func_name == "get_stock_crypto_price":
                                     tool_result = await get_finance_data(args.get("symbol"))
-                                # Add tool result to history
+                                elif func_name == "search_images":
+                                    tool_result = await search_images(args.get("query"))                                # Add tool result to history
                                 active_messages.append({
                                     "role": "tool",
                                     "content": str(tool_result),
