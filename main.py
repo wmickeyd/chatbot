@@ -92,13 +92,13 @@ async def track_lego_logic(url):
     timeout = aiohttp.ClientTimeout(total=60)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(SCRAPE_URL, params=params) as response:
+            # Use TRACK_URL (which is a POST request in the scraper)
+            async with session.post(TRACK_URL, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
-                    name = data.get('name', 'Unknown Set')
-                    prod_num = data.get('product_number', 'N/A')
-                    price = data.get('price', 'Price not found')
-                    return f"Successfully tracking {name} ({prod_num}). Current price: ${price}. URL: {url}"
+                    message = data.get('message', 'Successfully updated tracking.')
+                    price = data.get('price', 'N/A')
+                    return f"{message}. Current price: ${price}. URL: {url}"
                 else:
                     return f"Error from scraper: {response.status}"
     except Exception as e:
