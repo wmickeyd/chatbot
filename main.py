@@ -40,18 +40,27 @@ bot = commands.Bot(command_prefix='!', intents=intents, heartbeat_timeout=120.0)
 memory = {}
 
 async def search_web(query):
-    """Calls the webscraper API to search the web for a query."""
+    """Calls the webscraper API to search the web for a query with domain filtering."""
     params = {"q": query}
     timeout = aiohttp.ClientTimeout(total=60)
+    blacklist = ["grokipedia.com", "pinterest.com", "facebook.com", "instagram.com", "twitter.com", "tiktok.com"]
+    
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(SEARCH_URL, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
                     results = data.get('results', [])
-                    # Format results for the LLM
-                    formatted_results = "\n".join([f"- {r['title']}: {r['body']} (Link: {r['href']})" for r in results[:3]])
-                    return formatted_results
+                    
+                    # Filter out blacklisted domains
+                    filtered = []
+                    for r in results:
+                        if not any(domain in r['href'].lower() for domain in blacklist):
+                            filtered.append(r)
+                    
+                    # Format top 4 filtered results
+                    formatted_results = "\n".join([f"- {r['title']}: {r['body']} (Link: {r['href']})" for r in filtered[:4]])
+                    return formatted_results or "No reputable results found."
                 else:
                     return f"Error from search: {response.status}"
     except Exception as e:
@@ -156,7 +165,15 @@ async def ask_ollama(prompt, channel_id=None, images=None, system_override=None,
     if current_messages:
         messages = current_messages
     else:
-        system_instruction = system_override or "You are Kelor, a helpful AI assistant. Use the provided tools to answer questions if needed. If you use a tool, wait for the result before giving your final answer. Be concise."
+        system_instruction = system_override or (
+            "You are Kelor, a highly accurate utility assistant. "
+            "STRICT RULES:\n"
+            "1. For ANY factual question, you MUST use a tool.\n"
+            "2. NEVER guess numbers. If a tool fails, say 'I couldn't find that info.'\n"
+            "3. If you mention a source or a link, you MUST include the actual URL from the search results in your text.\n"
+            "4. Never say 'I provided a link' unless the URL is visible in your current response.\n"
+            "5. Be concise (1-3 sentences)."
+        )
         messages.append({"role": "system", "content": system_instruction})
         
         if channel_id and not images:
@@ -403,61 +420,67 @@ async def on_message(message):
             prompt = re.sub(f'<@!?{bot.user.id}>', '', message.content).strip()
             logger.info(f"Processing prompt: '{prompt}'")
             
-            # 3. Decision Logic Loop (Autonomous Tool Calling)
+            # 3. Decision Logic Loop (Multi-Turn Autonomous Loop)
             msg_to_edit = None
             response_text = ""
             last_update_time = 0
             
-            async for chunk_data in ask_ollama(prompt, channel_id=message.channel.id, images=images):
-                if chunk_data["type"] == "content":
-                    chunk = chunk_data["content"]
-                    response_text += chunk
-                    if not msg_to_edit:
-                        msg_to_edit = await message.channel.send(response_text[:2000] if response_text else "...")
-                    elif (datetime.now().timestamp() - last_update_time) > 1.0:
-                        await msg_to_edit.edit(content=response_text[:2000])
-                        last_update_time = datetime.now().timestamp()
+            # Use a loop to allow multiple tool calls in sequence
+            active_prompt = prompt
+            active_messages = None
+            max_turns = 3 # Prevent infinite loops
+            
+            for turn in range(max_turns):
+                found_tool_call = False
+                # If it's the first turn, use prompt. If not, use None (asking Ollama to continue based on history)
+                current_prompt = prompt if turn == 0 else None
                 
-                elif chunk_data["type"] == "tool_calls":
-                    # Bot wants to use tools
-                    history = chunk_data["messages"]
-                    # Add the assistant's tool call message to history
-                    history.append({"role": "assistant", "tool_calls": chunk_data["calls"]})
-                    
-                    for call in chunk_data["calls"]:
-                        func_name = call["function"]["name"]
-                        args = call["function"]["arguments"]
-                        logger.info(f"Bot calling tool: {func_name} with {args}")
-                        
-                        tool_result = ""
-                        if func_name == "search_web":
-                            tool_result = await search_web(args.get("query"))
-                        elif func_name == "read_url":
-                            tool_result = await read_url(args.get("url"))
-                        elif func_name == "track_lego_set":
-                            tool_result = await track_lego_logic(args.get("url"))
-                        
-                        # Add tool result to history
-                        history.append({
-                            "role": "tool",
-                            "content": str(tool_result),
-                            "name": func_name
-                        })
-                    
-                    # Call Ollama again with the tool results
-                    async for final_chunk in ask_ollama(None, channel_id=message.channel.id, current_messages=history):
-                        if final_chunk["type"] == "content":
-                            response_text += final_chunk["content"]
+                async for chunk_data in ask_ollama(current_prompt, channel_id=message.channel.id, images=images if turn == 0 else None, current_messages=active_messages):
+                    if chunk_data["type"] == "content":
+                        chunk = chunk_data["content"]
+                        response_text += chunk
+                        if chunk.strip(): # Only send if there's actual text
                             if not msg_to_edit:
-                                msg_to_edit = await message.channel.send(response_text[:2000] if response_text else "...")
+                                msg_to_edit = await message.channel.send(response_text[:2000])
                             elif (datetime.now().timestamp() - last_update_time) > 1.0:
                                 await msg_to_edit.edit(content=response_text[:2000])
                                 last_update_time = datetime.now().timestamp()
+                    
+                    elif chunk_data["type"] == "tool_calls":
+                        found_tool_call = True
+                        active_messages = chunk_data["messages"]
+                        active_messages.append({"role": "assistant", "tool_calls": chunk_data["calls"]})
+                        
+                        for call in chunk_data["calls"]:
+                            func_name = call["function"]["name"]
+                            args = call["function"]["arguments"]
+                            logger.info(f"Turn {turn}: Bot calling tool {func_name} with {args}")
+                            
+                            tool_result = ""
+                            if func_name == "search_web":
+                                tool_result = await search_web(args.get("query"))
+                            elif func_name == "read_url":
+                                tool_result = await read_url(args.get("url"))
+                            elif func_name == "track_lego_set":
+                                tool_result = await track_lego_logic(args.get("url"))
+                            
+                            active_messages.append({
+                                "role": "tool",
+                                "content": str(tool_result),
+                                "name": func_name
+                            })
+                        
+                        # After processing tools, we loop back to ask_ollama
+                        active_prompt = None
+                        break
+                
+                if not found_tool_call:
+                    break # Bot is done thinking, move to final response
             
             if msg_to_edit:
                 await msg_to_edit.edit(content=response_text[:2000])
             else:
-                await message.channel.send(response_text[:2000] if response_text else "I didn't get a response.")
+                await message.channel.send(response_text[:2000] if response_text else "I couldn't find a clear answer.")
             
             # 4. Handle Voice/TTS
             if response_text and message.guild and message.guild.voice_client:
