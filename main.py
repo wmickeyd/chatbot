@@ -12,6 +12,7 @@ import PyPDF2
 import docx
 from deep_translator import GoogleTranslator
 from RestrictedPython import compile_restricted, safe_builtins
+import yt_dlp
 import asyncio
 import numexpr
 from datetime import datetime
@@ -705,6 +706,91 @@ async def leave(ctx):
         logger.info("Left voice channel.")
     else:
         await ctx.send("I'm not in a voice channel!")
+
+# yt-dlp setup
+ytdl_format_options = {
+    'format': 'bestaudio/best',
+    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    'restrictfilenames': True,
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'logtostderr': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0'
+}
+ffmpeg_options = {
+    'options': '-vn'
+}
+ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, volume=0.5):
+        super().__init__(source, volume)
+        self.data = data
+        self.title = data.get('title')
+        self.url = data.get('url')
+
+    @classmethod
+    async def from_url(cls, url, *, loop=None, stream=False):
+        loop = loop or asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+
+        if 'entries' in data:
+            data = data['entries'][0]
+
+        filename = data['url'] if stream else ytdl.prepare_filename(data)
+        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+
+@bot.command()
+async def play(ctx, *, url):
+    """Plays audio from a URL (YouTube, SoundCloud, Spotify)."""
+    async with ctx.typing():
+        if not ctx.voice_client:
+            if ctx.author.voice:
+                await ctx.author.voice.channel.connect()
+            else:
+                return await ctx.send("You are not connected to a voice channel.")
+        
+        if ctx.voice_client.is_playing():
+            ctx.voice_client.stop()
+
+        try:
+            player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+            ctx.voice_client.play(player, after=lambda e: logger.error(f'Player error: {e}') if e else None)
+            await ctx.send(f'**Now playing:** {player.title}')
+        except Exception as e:
+            logger.error(f"Error in play command: {e}")
+            await ctx.send(f"An error occurred while trying to play: {e}")
+
+@bot.command()
+async def pause(ctx):
+    """Pauses the currently playing audio."""
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.pause()
+        await ctx.send("Audio paused.")
+    else:
+        await ctx.send("No audio is currently playing.")
+
+@bot.command()
+async def resume(ctx):
+    """Resumes the currently paused audio."""
+    if ctx.voice_client and ctx.voice_client.is_paused():
+        ctx.voice_client.resume()
+        await ctx.send("Audio resumed.")
+    else:
+        await ctx.send("Audio is not paused.")
+
+@bot.command()
+async def stop(ctx):
+    """Stops the audio."""
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+        await ctx.send("Audio stopped.")
+    else:
+        await ctx.send("No audio is currently playing.")
 
 @bot.command()
 async def speak(ctx, *, text=None):
