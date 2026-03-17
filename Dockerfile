@@ -1,4 +1,4 @@
-FROM python:3.15-slim
+FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN apt-get update && apt-get install -y iputils-ping ffmpeg libopus-dev gcc libffi-dev python3-dev make && rm -rf /var/lib/apt/lists/*
