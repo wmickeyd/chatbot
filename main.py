@@ -8,6 +8,10 @@ import re
 import base64
 import wikipediaapi
 from gtts import gTTS
+import PyPDF2
+import docx
+from deep_translator import GoogleTranslator
+from RestrictedPython import compile_restricted, safe_builtins
 import asyncio
 import numexpr
 from datetime import datetime
@@ -200,6 +204,58 @@ async def read_reddit(url):
         logger.error(f"Error calling Reddit tool: {e}")
         return f"Could not read Reddit thread. (Error: {e})"
 
+async def read_document(url):
+    """Downloads and extracts text from PDF or DOCX files."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    content = await response.read()
+                    import io
+                    text = ""
+                    if url.lower().endswith('.pdf'):
+                        pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+                        for page in pdf_reader.pages:
+                            text += page.extract_text() or ""
+                    elif url.lower().endswith('.docx'):
+                        doc = docx.Document(io.BytesIO(content))
+                        text = "\n".join([para.text for para in doc.paragraphs])
+                    else:
+                        return "Unsupported document format. Only PDF and DOCX are supported."
+                    
+                    return f"DOCUMENT CONTENT (from {url}):\n\n{text[:5000]}" # Limit to 5000 chars for context
+                else:
+                    return f"Error downloading document: {response.status}"
+    except Exception as e:
+        logger.error(f"Error reading document: {e}")
+        return f"Could not read the document. (Error: {e})"
+
+async def translate_text(text, target_lang='en'):
+    """Translates text to a target language."""
+    try:
+        translated = GoogleTranslator(source='auto', target=target_lang).translate(text)
+        return f"Translated text ({target_lang}): {translated}"
+    except Exception as e:
+        logger.error(f"Error translating text: {e}")
+        return f"Could not translate. (Error: {e})"
+
+async def execute_python(code):
+    """Executes small Python snippets in a restricted sandbox."""
+    try:
+        # Prepare the restricted environment
+        loc = {}
+        # RestrictedPython.compile_restricted is used to compile the code
+        byte_code = compile_restricted(code, filename='<string>', mode='exec')
+        # We need to provide safe builtins
+        exec(byte_code, {'__builtins__': safe_builtins}, loc)
+        # Assuming the code might set a 'result' variable or we just return the local variables
+        if 'result' in loc:
+            return str(loc['result'])
+        return str(loc)
+    except Exception as e:
+        logger.error(f"Error executing python: {e}")
+        return f"Execution error: {e}"
+
 async def calculate_logic(expression):
     """Evaluates a mathematical expression using numexpr safely."""
     try:
@@ -336,6 +392,49 @@ TOOLS = [
                     "url": {"type": "string", "description": "The full Reddit thread URL."}
                 },
                 "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_document",
+            "description": "Read and extract text from an uploaded PDF or DOCX file URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL of the PDF or DOCX file."}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "translate_text",
+            "description": "Translate text into a target language.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The text to translate."},
+                    "target_lang": {"type": "string", "description": "Target language code (e.g., 'es' for Spanish, 'fr' for French, 'de' for German)."}
+                },
+                "required": ["text", "target_lang"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_python",
+            "description": "Execute a small Python script for complex logic or data processing in a sandbox. Result must be assigned to the variable 'result'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "The Python code to execute."}
+                },
+                "required": ["code"]
             }
         }
     }
@@ -647,8 +746,9 @@ async def on_message(message):
 
     if bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         async with message.channel.typing():
-            # 1. Image Detection
+            # 1. Attachment Detection (Images & Documents)
             images = []
+            docs = []
             for attachment in message.attachments:
                 if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp']):
                     logger.info(f"Image found: {attachment.filename}")
@@ -657,9 +757,17 @@ async def on_message(message):
                             if resp.status == 200:
                                 img_data = await resp.read()
                                 images.append(base64.b64encode(img_data).decode('utf-8'))
+                elif any(attachment.filename.lower().endswith(ext) for ext in ['.pdf', '.docx']):
+                    logger.info(f"Document found: {attachment.filename}")
+                    docs.append(attachment.url)
 
             # 2. Extract clean prompt
             prompt = re.sub(f'<@!?{bot.user.id}>', '', message.content).strip()
+            
+            # If documents were found, append their URLs to the prompt so the LLM knows it can read them
+            if docs:
+                prompt += "\n\nI have uploaded these documents, you can use the 'read_document' tool to read them if needed:\n" + "\n".join(docs)
+            
             logger.info(f"Processing prompt: '{prompt}'")
             
             # 3. Decision Logic Loop (Multi-Turn Autonomous Loop)
@@ -724,6 +832,12 @@ async def on_message(message):
                                     tool_result = await get_news(args.get("query"))
                                 elif func_name == "read_reddit":
                                     tool_result = await read_reddit(args.get("url"))
+                                elif func_name == "read_document":
+                                    tool_result = await read_document(args.get("url"))
+                                elif func_name == "translate_text":
+                                    tool_result = await translate_text(args.get("text"), args.get("target_lang", "en"))
+                                elif func_name == "execute_python":
+                                    tool_result = await execute_python(args.get("code"))
                                 
                                 # Add tool result to history
                                 active_messages.append({

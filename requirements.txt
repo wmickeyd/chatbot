@@ -4,3 +4,7 @@ aiohttp
 gTTS
 wikipedia-api
 numexpr
+PyPDF2
+python-docx
+deep-translator
+RestrictedPython
