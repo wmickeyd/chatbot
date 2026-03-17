@@ -985,6 +985,8 @@ async def _commands(ctx):
     # Utility Commands
     embed.add_field(name="!wiki <query>", value="Search Wikipedia for a summary.", inline=False)
     embed.add_field(name="!calc <expression>", value="Perform advanced math (e.g., `2^10`).", inline=False)
+    embed.add_field(name="!set <key> <value>", value="Update your profile (e.g. `!set model llama3`).", inline=False)
+    embed.add_field(name="!profile", value="View your current bot settings.", inline=False)
     
     # Tracking Commands
     embed.add_field(name="!track <url>", value="Start tracking a LEGO set price.", inline=False)
