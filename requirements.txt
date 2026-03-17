@@ -1,3 +1,4 @@
+sqlalchemy
 discord.py[voice]
 python-dotenv
 aiohttp
