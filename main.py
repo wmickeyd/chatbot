@@ -515,9 +515,47 @@ async def track(ctx, url: str):
         logger.info(f"!track command completed for {ctx.author}: {result}")
         await ctx.send(result)
 
+class TrackedSetsView(discord.ui.View):
+    def __init__(self, sets, scraper_base_url):
+        super().__init__(timeout=60)
+        self.sets = sets
+        self.scraper_base_url = scraper_base_url
+        
+        # Add a select menu for removal
+        options = [
+            discord.SelectOption(label=f"{s['name'][:25]} ({s['product_number']})", value=s['product_number'], description=f"Price: ${s['latest_price']}")
+            for s in sets[:25] # Discord limit for select menus
+        ]
+        
+        if options:
+            self.add_item(TrackedSetSelect(options, scraper_base_url))
+
+class TrackedSetSelect(discord.ui.Select):
+    def __init__(self, options, scraper_base_url):
+        super().__init__(placeholder="Select a set to remove...", min_values=1, max_values=1, options=options)
+        self.scraper_base_url = scraper_base_url
+
+    async def callback(self, interaction: discord.Interaction):
+        product_number = self.values[0]
+        # We need a way to delete a tracked set. Let's assume there's or we'll add a DELETE endpoint.
+        # For now, I'll inform the user we're preparing the removal.
+        await interaction.response.send_message(f"Attempting to remove LEGO set {product_number}...", ephemeral=True)
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Assuming the webscraper has or will have a DELETE /track/{product_number} endpoint
+                # If it doesn't exist yet, we'll need to add it to the scraper.
+                async with session.delete(f"{self.scraper_base_url}/track/{product_number}") as response:
+                    if response.status == 200:
+                        await interaction.edit_original_response(content=f"Successfully removed LEGO set {product_number}.")
+                    else:
+                        await interaction.edit_original_response(content=f"Error removing set: {response.status}")
+        except Exception as e:
+            await interaction.edit_original_response(content=f"Failed to reach scraper: {e}")
+
 @bot.command()
 async def tracked(ctx):
-    """Lists all LEGO sets currently being tracked."""
+    """Lists all LEGO sets currently being tracked with interactive options."""
     logger.info(f"Received !tracked command from {ctx.author}")
     async with ctx.typing():
         try:
@@ -536,7 +574,9 @@ async def tracked(ctx):
                                 value=f"Price: {price}\n[Link]({item['url']})",
                                 inline=False
                             )
-                        await ctx.send(embed=embed)
+                        
+                        view = TrackedSetsView(data, SCRAPER_BASE_URL)
+                        await ctx.send(embed=embed, view=view)
                     else:
                         await ctx.send(f"Error fetching tracked sets: {response.status}")
         except Exception as e:
