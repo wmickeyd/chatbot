@@ -10,3 +10,12 @@ class ChatMessage(Base):
     role = Column(String)  # 'system', 'user', 'assistant', 'tool'
     content = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    user_id = Column(String, primary_key=True, index=True)
+    preferred_model = Column(String, default="gemma")
+    preferred_temp_unit = Column(String, default="Celsius")
+    preferred_lang = Column(String, default="en")
+    timezone = Column(String, default="UTC")

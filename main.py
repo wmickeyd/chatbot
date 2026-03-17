@@ -447,12 +447,19 @@ TOOLS = [
     }
 ]
 
-async def ask_ollama(prompt, channel_id=None, images=None, system_override=None, current_messages=None):
+async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_override=None, current_messages=None):
     # Initialize database session
     db = database.SessionLocal()
     
+    # Check for user profile preferences
+    user_model = OLLAMA_MODEL
+    if user_id:
+        profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == str(user_id)).first()
+        if profile and profile.preferred_model:
+            user_model = profile.preferred_model
+
     # Use vision model if images are provided, otherwise use text model
-    model = OLLAMA_VISION_MODEL if images else OLLAMA_MODEL
+    model = OLLAMA_VISION_MODEL if images else user_model
 
     # Construct messages for /api/chat
     messages = []
@@ -861,6 +868,55 @@ async def calc(ctx, *, expression: str):
 async def ping(ctx):
     await ctx.send('Pong!')
 
+@bot.command(name="set")
+async def _set(ctx, key: str = None, value: str = None):
+    """Update your personal bot settings (e.g. !set model llama3)."""
+    if not key or not value:
+        return await ctx.send("Usage: `!set <key> <value>`\nKeys: `model`, `unit` (Celsius/Fahrenheit), `lang` (e.g., 'es', 'fr', 'en')")
+    
+    db = database.SessionLocal()
+    try:
+        user_id = str(ctx.author.id)
+        profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == user_id).first()
+        if not profile:
+            profile = models.UserProfile(user_id=user_id)
+            db.add(profile)
+        
+        if key.lower() == 'model':
+            profile.preferred_model = value
+        elif key.lower() == 'unit':
+            profile.preferred_temp_unit = value
+        elif key.lower() == 'lang':
+            profile.preferred_lang = value
+        else:
+            return await ctx.send(f"Unknown setting: {key}. Available: `model`, `unit`, `lang`.")
+        
+        db.commit()
+        await ctx.send(f"Successfully updated your `{key}` preference to `{value}`!")
+    except Exception as e:
+        logger.error(f"Error in !set command: {e}")
+        await ctx.send(f"Could not update setting: {e}")
+    finally:
+        db.close()
+
+@bot.command(name="profile")
+async def _profile(ctx):
+    """View your current bot settings."""
+    db = database.SessionLocal()
+    try:
+        user_id = str(ctx.author.id)
+        profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == user_id).first()
+        if not profile:
+            return await ctx.send("You haven't set any preferences yet. Use `!set` to customize your experience!")
+        
+        embed = discord.Embed(title=f"User Profile: {ctx.author.name}", color=discord.Color.teal())
+        embed.add_field(name="Model", value=profile.preferred_model)
+        embed.add_field(name="Temperature Unit", value=profile.preferred_temp_unit)
+        embed.add_field(name="Language", value=profile.preferred_lang)
+        await ctx.send(embed=embed)
+    finally:
+        db.close()
+
 @bot.command(name="commands")
 async def _commands(ctx):
     """Lists all available bot commands."""
@@ -936,7 +992,7 @@ async def on_message(message):
                     # If it's the first turn, use prompt. If not, use None (asking Ollama to continue based on history)
                     current_prompt = prompt if turn == 0 else None
                     
-                    async for chunk_data in ask_ollama(current_prompt, channel_id=message.channel.id, images=images if turn == 0 else None, current_messages=active_messages):
+                    async for chunk_data in ask_ollama(current_prompt, channel_id=message.channel.id, user_id=message.author.id, images=images if turn == 0 else None, current_messages=active_messages):
                         if chunk_data["type"] == "content":
                             chunk = chunk_data["content"]
                             response_text += chunk
