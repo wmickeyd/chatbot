@@ -687,6 +687,18 @@ async def on_disconnect():
 async def on_resumed():
     logger.info("Bot has successfully resumed its session.")
 
+@bot.event
+async def on_command_error(ctx, error):
+    """Global error handler for commands."""
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"Missing required argument: `{error.param.name}`. Use `!commands` to see usage.")
+    elif isinstance(error, commands.CommandNotFound):
+        # Ignore command not found errors to avoid spam
+        pass
+    else:
+        logger.error(f"Command Error in !{ctx.command}: {error}")
+        await ctx.send(f"An error occurred while running the command: {error}")
+
 @bot.command()
 async def wiki(ctx, *, query: str):
     """Searches Wikipedia for a summary of a topic."""
