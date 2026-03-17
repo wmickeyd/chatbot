@@ -1,5 +1,6 @@
 sqlalchemy
 discord.py[voice]
+pynacl
 python-dotenv
 aiohttp
 gTTS
