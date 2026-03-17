@@ -15,7 +15,7 @@ from RestrictedPython import compile_restricted, safe_builtins
 import yt_dlp
 import asyncio
 import numexpr
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # Database imports for persistence
@@ -548,6 +548,9 @@ async def on_ready():
     
     # Start health check background task
     bot.loop.create_task(update_health_check())
+    
+    # Start chat history cleanup task (Retention Policy)
+    bot.loop.create_task(cleanup_old_messages())
 
     # Check for voice support
     try:
@@ -578,6 +581,33 @@ async def update_health_check():
         except Exception as e:
             logger.error(f"Error updating health check: {e}")
         await asyncio.sleep(30)
+
+async def cleanup_old_messages():
+    """Background task to delete chat messages older than 30 days every 24 hours."""
+    while not bot.is_closed():
+        try:
+            # We only run this if the bot is ready
+            if bot.is_ready():
+                db = database.SessionLocal()
+                # Calculate the 30-day cutoff
+                cutoff_date = datetime.utcnow() - timedelta(days=30)
+                
+                # Use a proper delete query to remove old entries
+                deleted_count = db.query(models.ChatMessage).filter(models.ChatMessage.timestamp < cutoff_date).delete()
+                
+                if deleted_count > 0:
+                    db.commit()
+                    logger.info(f"Cleanup: Successfully deleted {deleted_count} messages older than 30 days.")
+                else:
+                    logger.info("Cleanup: No old messages to delete.")
+                db.close()
+            else:
+                logger.warning("Bot not ready. Skipping chat history cleanup.")
+        except Exception as e:
+            logger.error(f"Error in chat history cleanup: {e}")
+        
+        # Sleep for 24 hours (86400 seconds)
+        await asyncio.sleep(86400)
 
 @bot.event
 async def on_disconnect():
