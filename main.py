@@ -31,6 +31,9 @@ TRACK_URL = f"{SCRAPER_BASE_URL}/track"
 SCRAPE_URL = f"{SCRAPER_BASE_URL}/scrape"
 FINANCE_URL = f"{SCRAPER_BASE_URL}/finance"
 IMAGE_SEARCH_URL = f"{SCRAPER_BASE_URL}/image_search"
+WEATHER_URL = f"{SCRAPER_BASE_URL}/weather"
+NEWS_URL = f"{SCRAPER_BASE_URL}/news"
+REDDIT_URL = f"{SCRAPER_BASE_URL}/reddit"
 
 # Set up intents (permissions)
 intents = discord.Intents.default()
@@ -144,6 +147,59 @@ async def search_images(query):
         logger.error(f"Error calling image search: {e}")
         return f"Could not search for images. (Error: {e})"
 
+async def get_weather(location):
+    """Calls the webscraper API to get weather data."""
+    params = {"location": location}
+    timeout = aiohttp.ClientTimeout(total=60)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(WEATHER_URL, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return f"Weather for {data['location']}: {data['condition']}, Temperature: {data['temp']}, Feels like: {data['feels_like']}, Humidity: {data['humidity']}"
+                else:
+                    return f"Error from weather tool: {response.status}"
+    except Exception as e:
+        logger.error(f"Error calling weather: {e}")
+        return f"Could not get weather data. (Error: {e})"
+
+async def get_news(query):
+    """Calls the webscraper API to get the latest news on a topic."""
+    params = {"q": query}
+    timeout = aiohttp.ClientTimeout(total=60)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(NEWS_URL, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    results = data.get('results', [])
+                    formatted = "\n".join([f"- {r['title']}: {r['body']} (Link: {r['url']})" for r in results])
+                    return formatted or "No news found for this topic."
+                else:
+                    return f"Error from news tool: {response.status}"
+    except Exception as e:
+        logger.error(f"Error calling news: {e}")
+        return f"Could not get news. (Error: {e})"
+
+async def read_reddit(url):
+    """Calls the webscraper API to read a Reddit thread."""
+    params = {"url": url}
+    timeout = aiohttp.ClientTimeout(total=60)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(REDDIT_URL, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    content = f"Title: {data['title']}\n\nContent:\n{data['content']}\n\nTop Comments:\n"
+                    for comment in data.get('comments', []):
+                        content += f"- {comment['author']}: {comment['body'][:200]}...\n"
+                    return content
+                else:
+                    return f"Error from Reddit tool: {response.status}"
+    except Exception as e:
+        logger.error(f"Error calling Reddit tool: {e}")
+        return f"Could not read Reddit thread. (Error: {e})"
+
 async def calculate_logic(expression):
     """Evaluates a mathematical expression using numexpr safely."""
     try:
@@ -236,6 +292,48 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "The LEGO.com product URL."}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather for a specific location.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "The city and country, e.g., 'London, UK'."}
+                },
+                "required": ["location"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_news",
+            "description": "Get latest news headlines for a specific topic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The news topic to search for."}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_reddit",
+            "description": "Read and summarize a Reddit thread and its top comments from a URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The full Reddit thread URL."}
                 },
                 "required": ["url"]
             }
@@ -580,6 +678,12 @@ async def on_message(message):
                                     tool_result = await calculate_logic(args.get("expression"))
                                 elif func_name == "search_images":
                                     tool_result = await search_images(args.get("query"))
+                                elif func_name == "get_weather":
+                                    tool_result = await get_weather(args.get("location"))
+                                elif func_name == "get_news":
+                                    tool_result = await get_news(args.get("query"))
+                                elif func_name == "read_reddit":
+                                    tool_result = await read_reddit(args.get("url"))
                                 
                                 # Add tool result to history
                                 active_messages.append({
