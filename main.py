@@ -18,6 +18,13 @@ import numexpr
 from datetime import datetime
 from dotenv import load_dotenv
 
+# Database imports for persistence
+from sqlalchemy.orm import Session
+import database, models
+
+# Initialize database tables
+models.Base.metadata.create_all(bind=database.engine)
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -47,8 +54,7 @@ intents.message_content = True
 # Define bot prefix
 bot = commands.Bot(command_prefix='!', intents=intents, heartbeat_timeout=120.0)
 
-# Memory storage (channel_id -> list of messages)
-memory = {}
+# Memory storage (channel_id -> list of messages) is now handled via SQLAlchemy
 
 async def search_web(query):
     """Calls the webscraper API to search the web for a query with domain filtering."""
@@ -442,9 +448,8 @@ TOOLS = [
 ]
 
 async def ask_ollama(prompt, channel_id=None, images=None, system_override=None, current_messages=None):
-    # Initialize memory for the channel if it doesn't exist
-    if channel_id and channel_id not in memory:
-        memory[channel_id] = []
+    # Initialize database session
+    db = database.SessionLocal()
     
     # Use vision model if images are provided, otherwise use text model
     model = OLLAMA_VISION_MODEL if images else OLLAMA_MODEL
@@ -465,8 +470,10 @@ async def ask_ollama(prompt, channel_id=None, images=None, system_override=None,
         messages.append({"role": "system", "content": system_instruction})
         
         if channel_id and not images:
-            for msg in memory[channel_id]:
-                messages.append(msg)
+            # Retrieve last 10 messages from database for this channel
+            history = db.query(models.ChatMessage).filter(models.ChatMessage.channel_id == str(channel_id)).order_by(models.ChatMessage.timestamp.desc()).limit(10).all()
+            for msg in reversed(history):
+                messages.append({"role": msg.role, "content": msg.content})
         
         user_msg = {"role": "user", "content": prompt}
         if images:
@@ -519,17 +526,20 @@ async def ask_ollama(prompt, channel_id=None, images=None, system_override=None,
                     else:
                         # Only update memory on final response
                         if channel_id and not images:
-                            memory[channel_id].append({"role": "user", "content": prompt or "Follow-up"})
-                            memory[channel_id].append({"role": "assistant", "content": full_response_content})
-                            if len(memory[channel_id]) > 10:
-                                memory[channel_id] = memory[channel_id][-10:]
-                            logger.info(f"Memory updated for channel {channel_id}")
+                            user_entry = models.ChatMessage(channel_id=str(channel_id), role="user", content=prompt or "Follow-up")
+                            assistant_entry = models.ChatMessage(channel_id=str(channel_id), role="assistant", content=full_response_content)
+                            db.add(user_entry)
+                            db.add(assistant_entry)
+                            db.commit()
+                            logger.info(f"Persistent memory updated for channel {channel_id}")
                 else:
                     logger.error(f"Ollama error: {response.status}")
                     yield {"type": "content", "content": f"Error: Ollama returned status {response.status}"}
     except Exception as e:
         logger.error(f"Error calling Ollama: {e}")
         yield {"type": "content", "content": f"Error: {e}"}
+    finally:
+        db.close()
 
 @bot.event
 async def on_ready():
@@ -820,6 +830,30 @@ async def calc(ctx, *, expression: str):
 @bot.command()
 async def ping(ctx):
     await ctx.send('Pong!')
+
+@bot.command(name="commands")
+async def _commands(ctx):
+    """Lists all available bot commands."""
+    embed = discord.Embed(title="Kelor Bot Commands", color=discord.Color.blue())
+    
+    # Utility Commands
+    embed.add_field(name="!wiki <query>", value="Search Wikipedia for a summary.", inline=False)
+    embed.add_field(name="!calc <expression>", value="Perform advanced math (e.g., `2^10`).", inline=False)
+    
+    # Tracking Commands
+    embed.add_field(name="!track <url>", value="Start tracking a LEGO set price.", inline=False)
+    embed.add_field(name="!tracked", value="List and manage all tracked LEGO sets.", inline=False)
+    
+    # Music/Voice Commands
+    embed.add_field(name="!join / !leave", value="Join or leave a voice channel.", inline=False)
+    embed.add_field(name="!play <url/search>", value="Play audio from YouTube, Spotify, etc.", inline=False)
+    embed.add_field(name="!pause / !resume / !stop", value="Control music playback.", inline=False)
+    embed.add_field(name="!speak <text>", value="Convert text to speech in voice channel.", inline=False)
+    
+    # LLM Features (Autonomous)
+    embed.add_field(name="Mention @Kelor", value="Ask me anything! I can search the web, read PDFs/Docs, translate text, get weather, and more.", inline=False)
+    
+    await ctx.send(embed=embed)
 
 @bot.event
 async def on_message(message):
