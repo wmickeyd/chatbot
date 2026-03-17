@@ -15,22 +15,25 @@ from RestrictedPython import compile_restricted, safe_builtins
 import yt_dlp
 import chromadb
 from chromadb.config import Settings
-import ollama
+from ollama import Client
 
 # Initialize ChromaDB (Local persistence)
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 # Get or create a collection for long-term chat memory
 collection = chroma_client.get_or_create_collection(name="chat_history")
 
+# Initialize Ollama client with the correct host
+# OLLAMA_URL is defined later, but we need the host now for the client
+ollama_host = os.getenv('OLLAMA_URL', 'http://localhost:11434').replace('/api/generate', '')
+ollama_client = Client(host=ollama_host)
+
 def save_to_vector_db_sync(user_id, channel_id, role, content):
     """Saves a message to ChromaDB as a vector embedding (Synchronous since chromadb is sync)."""
     try:
-        # Generate the embedding using Ollama's local API (synchronously)
-        # We'll use 'nomic-embed-text' if possible, or fallback to the main model
+        # Generate the embedding using the custom Ollama client
         embed_model = "nomic-embed-text" 
         
-        # Use ollama-python client
-        resp = ollama.embeddings(model=embed_model, prompt=content)
+        resp = ollama_client.embeddings(model=embed_model, prompt=content)
         embedding = resp['embedding']
         
         # Add to ChromaDB
@@ -42,13 +45,13 @@ def save_to_vector_db_sync(user_id, channel_id, role, content):
         )
         logger.info(f"Saved {role} message to long-term vector memory.")
     except Exception as e:
-        logger.error(f"Error saving to vector DB: {e}. (Ensure 'nomic-embed-text' is pulled)")
+        logger.error(f"Error saving to vector DB: {e}. (Ensure 'nomic-embed-text' is pulled and Ollama is reachable at {ollama_host})")
 
 def query_vector_db_sync(query_text, n_results=3):
     """Searches long-term memory for semantically similar past conversations."""
     try:
         embed_model = "nomic-embed-text"
-        resp = ollama.embeddings(model=embed_model, prompt=query_text)
+        resp = ollama_client.embeddings(model=embed_model, prompt=query_text)
         embedding = resp['embedding']
         
         results = collection.query(
@@ -60,7 +63,7 @@ def query_vector_db_sync(query_text, n_results=3):
             return "\n".join(results['documents'][0])
         return ""
     except Exception as e:
-        logger.error(f"Error querying vector DB: {e}")
+        logger.error(f"Error querying vector DB: {e}. (Ensure Ollama is reachable at {ollama_host})")
         return ""
 
 import asyncio
