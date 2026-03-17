@@ -22,7 +22,7 @@ load_dotenv(dotenv_path="deploy/base/.env")
 
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3')
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma')
 OLLAMA_VISION_MODEL = os.getenv('OLLAMA_VISION_MODEL', 'llava')
 SCRAPER_BASE_URL = os.getenv('SCRAPER_BASE_URL', 'http://dev-webscraper.webscraper-dev.svc.cluster.local')
 SCRAPER_URL = f"{SCRAPER_BASE_URL}/read"
@@ -260,8 +260,8 @@ async def ask_ollama(prompt, channel_id=None, images=None, system_override=None,
         current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
         system_instruction = system_override or (
             f"You are Kelor, a utility assistant with REAL-TIME access to the web. Current time is {current_time}. "
-            "You MUST use tools for any factual query (population, weather, news). "
-            "NEVER say you don't have access to information; instead, call a tool to find it. "
+            "You MUST use tools for any factual query (population, weather, news, math). "
+            "Call tools silently and then provide the final answer based on the results. "
             "Only mention a source if you include the actual URL in your response."
         )
         messages.append({"role": "system", "content": system_instruction})
@@ -593,11 +593,11 @@ async def on_message(message):
                                 if func_name == "search_web":
                                     found_urls = re.findall(r'Link: (https?://\S+)', str(tool_result))
                                     if found_urls:
-                                        response_text += f"\n\nSource: {found_urls[0]}"
+                                        response_text += f"\n\nSource:\n {found_urls[0]}"
                                 elif func_name == "read_url" or func_name == "track_lego_set":
                                     found_urls = re.findall(r'https?://\S+', str(tool_result))
                                     if found_urls:
-                                        response_text += f"\n\nSource: {found_urls[0]}"
+                                        response_text += f"\n\nSource:\n {found_urls[0]}"
 
                             # After processing tools, we loop back to ask_ollama
                             active_prompt = None
