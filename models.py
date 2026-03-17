@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime
-from datetime import datetime
+from datetime import datetime, timezone
 from database import Base
 
 class ChatMessage(Base):
@@ -9,7 +9,7 @@ class ChatMessage(Base):
     channel_id = Column(String, index=True)
     role = Column(String)  # 'system', 'user', 'assistant', 'tool'
     content = Column(Text)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"

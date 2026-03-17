@@ -37,7 +37,7 @@ def save_to_vector_db_sync(user_id, channel_id, role, content):
         collection.add(
             ids=[f"{user_id}_{datetime.now().timestamp()}"],
             embeddings=[embedding],
-            metadatas=[{"user_id": str(user_id), "channel_id": str(channel_id), "role": role, "timestamp": str(datetime.utcnow())}],
+            metadatas=[{"user_id": str(user_id), "channel_id": str(channel_id), "role": role, "timestamp": str(datetime.now(timezone.utc))}],
             documents=[content]
         )
         logger.info(f"Saved {role} message to long-term vector memory.")
@@ -65,7 +65,7 @@ def query_vector_db_sync(query_text, n_results=3):
 
 import asyncio
 import numexpr
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 # Database imports for persistence
@@ -657,7 +657,7 @@ async def cleanup_old_messages():
             if bot.is_ready():
                 db = database.SessionLocal()
                 # Calculate the 30-day cutoff
-                cutoff_date = datetime.utcnow() - timedelta(days=30)
+                cutoff_date = datetime.now(timezone.utc) - timedelta(days=30)
                 
                 # Use a proper delete query to remove old entries
                 deleted_count = db.query(models.ChatMessage).filter(models.ChatMessage.timestamp < cutoff_date).delete()
