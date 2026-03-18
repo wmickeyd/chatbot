@@ -223,7 +223,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search the web for real-time information, weather, news, or general knowledge.",
+            "description": "Search the web for real-time news, general knowledge, or specific facts. DO NOT use this for weather.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string", "description": "The search query."}},
@@ -259,10 +259,10 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_weather",
-            "description": "Get current weather for a specific location.",
+            "description": "Get current real-time weather for a specific location. Use this tool for ANY weather-related question.",
             "parameters": {
                 "type": "object",
-                "properties": {"location": {"type": "string", "description": "The city and country, e.g., 'London, UK'."}},
+                "properties": {"location": {"type": "string", "description": "The city, state, or zip code."}},
                 "required": ["location"]
             }
         }
