@@ -351,6 +351,7 @@ class LLMCog(commands.Cog):
             current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
             system_instruction = system_override or (
                 f"You are Kelor, a utility assistant with REAL-TIME access to the web. Current time is {current_time}. "
+                "You have VISION capabilities and can see and analyze any photos the user uploads. "
                 "You MUST use tools for any factual query (sports scores, stock prices, news, weather). "
                 "NEVER guess or use internal knowledge for real-time data. If search results are unclear, say so. "
                 "Call tools silently. Do NOT output any text or 'thought process' before or during a tool call."
@@ -371,22 +372,29 @@ class LLMCog(commands.Cog):
                 if images: user_msg["images"] = images
                 messages.append(user_msg)
             else:
-                user_msg = {"role": "user", "content": "Analyze these photos." if images else "Hello"}
+                user_msg = {"role": "user", "content": "Please analyze these photos in detail." if images else "Hello"}
                 if images: user_msg["images"] = images
                 messages.append(user_msg)
+
+        # IMPORTANT: Disable tools if images are present. 
+        # Many multimodal models (like Gemma 3) struggle to process tools and images in the same request,
+        # and this also avoids the 400 "does not support tools" error for multimodal requests.
+        use_tools = TOOLS if not images else []
 
         payload = {
             "model": model,
             "messages": messages,
             "stream": True,
-            "tools": TOOLS
+            "tools": use_tools
         }
 
         async def perform_request(current_payload):
             chat_url = OLLAMA_URL.replace("/generate", "/chat")
             timeout = aiohttp.ClientTimeout(total=120)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                logger.info(f"Sending request to Ollama: {model} (Tools: {'Yes' if current_payload.get('tools') else 'No'})")
+                img_count = sum(len(m.get('images', [])) for m in current_payload['messages'] if isinstance(m, dict))
+                logger.info(f"Sending request to Ollama: {model} (Tools: {'Yes' if current_payload.get('tools') else 'No'}, Images: {img_count})")
+                
                 async with session.post(chat_url, json=current_payload) as response:
                     if response.status == 200:
                         full_response_content = ""
