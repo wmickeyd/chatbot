@@ -13,7 +13,7 @@ from RestrictedPython import compile_restricted, safe_builtins
 import asyncio
 from datetime import datetime, timedelta, timezone
 from config import (
-    OLLAMA_URL, OLLAMA_MODEL, OLLAMA_VISION_MODEL,
+    OLLAMA_URL, OLLAMA_MODEL,
     SCRAPER_URL, TRACK_URL, FINANCE_URL, SEARCH_URL,
     IMAGE_SEARCH_URL, WEATHER_URL, NEWS_URL, REDDIT_URL
 )
