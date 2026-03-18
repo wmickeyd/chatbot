@@ -562,6 +562,7 @@ async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_
     timeout = aiohttp.ClientTimeout(total=120)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            logger.info(f"Sending request to Ollama: {model} (Tools: {'Yes' if payload.get('tools') else 'No'})")
             async with session.post(chat_url, json=payload) as response:
                 if response.status == 200:
                     full_response_content = ""
@@ -607,8 +608,9 @@ async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_
                             
                             logger.info(f"Persistent memory updated for channel {channel_id}")
                 else:
-                    logger.error(f"Ollama error: {response.status}")
-                    yield {"type": "content", "content": f"Error: Ollama returned status {response.status}"}
+                    error_body = await response.text()
+                    logger.error(f"Ollama error: {response.status} - {error_body}")
+                    yield {"type": "content", "content": f"Error: Ollama returned status {response.status}. {error_body}"}
     except Exception as e:
         logger.error(f"Error calling Ollama: {e}")
         yield {"type": "content", "content": f"Error: {e}"}
