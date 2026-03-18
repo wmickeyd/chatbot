@@ -50,3 +50,7 @@ spec:
             secretKeyRef:
               name: chatbot-secrets
               key: DISCORD_TOKEN
+        - name: SCRAPER_BASE_URL
+          value: "http://dev-webscraper.webscraper-dev.svc.cluster.local"
+        - name: UTILITY_BASE_URL
+          value: "http://dev-utility-api.utility-dev.svc.cluster.local"
