@@ -6,8 +6,7 @@ load_dotenv(dotenv_path="deploy/base/.env")
 
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma')
-OLLAMA_VISION_MODEL = os.getenv('OLLAMA_VISION_MODEL', 'llava')
+OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma3n:e4b')
 SCRAPER_BASE_URL = os.getenv('SCRAPER_BASE_URL', 'http://dev-webscraper.webscraper-dev.svc.cluster.local')
 UTILITY_BASE_URL = os.getenv('UTILITY_BASE_URL', 'http://dev-utility-api.utility-dev.svc.cluster.local')
 

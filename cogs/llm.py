@@ -338,12 +338,11 @@ class LLMCog(commands.Cog):
 
     async def ask_ollama(self, prompt, channel_id=None, user_id=None, images=None, system_override=None, current_messages=None):
         db = database.SessionLocal()
-        user_model = OLLAMA_MODEL
+        model = OLLAMA_MODEL
         if user_id:
             profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == str(user_id)).first()
             if profile and profile.preferred_model:
-                user_model = profile.preferred_model
-        model = OLLAMA_VISION_MODEL if images else user_model
+                model = profile.preferred_model
         
         messages = []
         if current_messages:
@@ -355,7 +354,9 @@ class LLMCog(commands.Cog):
                 "You MUST use tools for any factual query. Call tools silently. Only mention a source if you include the URL."
             )
             messages.append({"role": "system", "content": system_instruction})
-            if channel_id and not images:
+            
+            # Retrieve last 10 messages from SQL database for current context (ALWAYS do this)
+            if channel_id:
                 history = db.query(models.ChatMessage).filter(models.ChatMessage.channel_id == str(channel_id)).order_by(models.ChatMessage.timestamp.desc()).limit(10).all()
                 last_role = "system"
                 for msg in reversed(history):
@@ -368,13 +369,15 @@ class LLMCog(commands.Cog):
                 if images: user_msg["images"] = images
                 messages.append(user_msg)
             else:
-                messages.append({"role": "user", "content": "Analyze this image." if images else "Hello"})
+                user_msg = {"role": "user", "content": "Analyze these photos." if images else "Hello"}
+                if images: user_msg["images"] = images
+                messages.append(user_msg)
 
         payload = {
             "model": model,
             "messages": messages,
             "stream": True,
-            "tools": TOOLS if not images else [] 
+            "tools": TOOLS
         }
 
         async def perform_request(current_payload):

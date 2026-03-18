@@ -27,8 +27,6 @@ patches:
               value: "http://192.168.86.27:11434/api/generate"
             - name: OLLAMA_MODEL
               value: "gemma3n:e4b"
-            - name: OLLAMA_VISION_MODEL
-              value: "moondream"
             - name: SCRAPER_BASE_URL
               value: "http://dev-webscraper.webscraper-dev.svc.cluster.local"
             - name: UTILITY_BASE_URL

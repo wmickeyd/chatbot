@@ -58,5 +58,3 @@ spec:
           value: "http://host.docker.internal:11434"
         - name: OLLAMA_MODEL
           value: "gemma3n:e4b"
-        - name: OLLAMA_VISION_MODEL
-          value: "moondream"
