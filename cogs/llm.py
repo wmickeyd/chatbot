@@ -223,7 +223,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search the web for real-time news, general knowledge, or specific facts. DO NOT use this for weather.",
+            "description": "Search the web for real-time news, general knowledge, or specific facts.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string", "description": "The search query."}},
@@ -351,7 +351,9 @@ class LLMCog(commands.Cog):
             current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
             system_instruction = system_override or (
                 f"You are Kelor, a utility assistant with REAL-TIME access to the web. Current time is {current_time}. "
-                "You MUST use tools for any factual query. Call tools silently. Only mention a source if you include the URL."
+                "You MUST use tools for any factual query (sports scores, stock prices, news, weather). "
+                "NEVER guess or use internal knowledge for real-time data. If search results are unclear, say so. "
+                "Call tools silently. Do NOT output any text or 'thought process' before or during a tool call."
             )
             messages.append({"role": "system", "content": system_instruction})
             
@@ -479,6 +481,7 @@ class LLMCog(commands.Cog):
                                         last_update_time = datetime.now().timestamp()
                             elif chunk_data["type"] == "tool_calls":
                                 found_tool_call = True
+                                response_text = "" # CLEAR any 'thinking' text because a tool is being used
                                 active_messages = chunk_data["messages"]
                                 active_messages.append({"role": "assistant", "tool_calls": chunk_data["calls"]})
                                 for tool_call in chunk_data["calls"]:
