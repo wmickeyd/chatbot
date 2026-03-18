@@ -90,15 +90,19 @@ OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'gemma')
 OLLAMA_VISION_MODEL = os.getenv('OLLAMA_VISION_MODEL', 'llava')
 SCRAPER_BASE_URL = os.getenv('SCRAPER_BASE_URL', 'http://dev-webscraper.webscraper-dev.svc.cluster.local')
+UTILITY_BASE_URL = os.getenv('UTILITY_BASE_URL', 'http://dev-utility-api.utility-dev.svc.cluster.local')
+
 SCRAPER_URL = f"{SCRAPER_BASE_URL}/read"
-SEARCH_URL = f"{SCRAPER_BASE_URL}/search"
 TRACK_URL = f"{SCRAPER_BASE_URL}/track"
 SCRAPE_URL = f"{SCRAPER_BASE_URL}/scrape"
-FINANCE_URL = f"{SCRAPER_BASE_URL}/finance"
-IMAGE_SEARCH_URL = f"{SCRAPER_BASE_URL}/image_search"
-WEATHER_URL = f"{SCRAPER_BASE_URL}/weather"
-NEWS_URL = f"{SCRAPER_BASE_URL}/news"
-REDDIT_URL = f"{SCRAPER_BASE_URL}/reddit"
+TRACKED_URL = f"{SCRAPER_BASE_URL}/tracked"
+
+FINANCE_URL = f"{UTILITY_BASE_URL}/finance"
+SEARCH_URL = f"{UTILITY_BASE_URL}/search"
+IMAGE_SEARCH_URL = f"{UTILITY_BASE_URL}/image_search"
+WEATHER_URL = f"{UTILITY_BASE_URL}/weather"
+NEWS_URL = f"{UTILITY_BASE_URL}/news"
+REDDIT_URL = f"{UTILITY_BASE_URL}/reddit"
 
 # Set up intents (permissions)
 intents = discord.Intents.default()
@@ -782,7 +786,7 @@ async def tracked(ctx):
     async with ctx.typing():
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"{SCRAPER_BASE_URL}/tracked") as response:
+                async with session.get(TRACKED_URL) as response:
                     if response.status == 200:
                         data = await response.json()
                         if not data:
