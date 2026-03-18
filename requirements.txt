@@ -11,5 +11,3 @@ python-docx
 deep-translator
 RestrictedPython
 yt-dlp
-chromadb
-ollama

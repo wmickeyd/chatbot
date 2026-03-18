@@ -13,59 +13,6 @@ import docx
 from deep_translator import GoogleTranslator
 from RestrictedPython import compile_restricted, safe_builtins
 import yt_dlp
-import chromadb
-from chromadb.config import Settings
-from ollama import Client
-
-# Initialize ChromaDB (Local persistence)
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
-# Get or create a collection for long-term chat memory
-collection = chroma_client.get_or_create_collection(name="chat_history")
-
-# Initialize Ollama client with the correct host
-# OLLAMA_URL is defined later, but we need the host now for the client
-ollama_host = os.getenv('OLLAMA_URL', 'http://localhost:11434').replace('/api/generate', '')
-ollama_client = Client(host=ollama_host)
-
-def save_to_vector_db_sync(user_id, channel_id, role, content):
-    """Saves a message to ChromaDB as a vector embedding (Synchronous since chromadb is sync)."""
-    try:
-        # Generate the embedding using the custom Ollama client
-        embed_model = "nomic-embed-text" 
-        
-        resp = ollama_client.embeddings(model=embed_model, prompt=content)
-        embedding = resp['embedding']
-        
-        # Add to ChromaDB
-        collection.add(
-            ids=[f"{user_id}_{datetime.now().timestamp()}"],
-            embeddings=[embedding],
-            metadatas=[{"user_id": str(user_id), "channel_id": str(channel_id), "role": role, "timestamp": str(datetime.now(timezone.utc))}],
-            documents=[content]
-        )
-        logger.info(f"Saved {role} message to long-term vector memory.")
-    except Exception as e:
-        logger.error(f"Error saving to vector DB: {e}. (Ensure 'nomic-embed-text' is pulled and Ollama is reachable at {ollama_host})")
-
-def query_vector_db_sync(query_text, n_results=3):
-    """Searches long-term memory for semantically similar past conversations."""
-    try:
-        embed_model = "nomic-embed-text"
-        resp = ollama_client.embeddings(model=embed_model, prompt=query_text)
-        embedding = resp['embedding']
-        
-        results = collection.query(
-            query_embeddings=[embedding],
-            n_results=n_results
-        )
-        
-        if results and results['documents'] and results['documents'][0]:
-            return "\n".join(results['documents'][0])
-        return ""
-    except Exception as e:
-        logger.error(f"Error querying vector DB: {e}. (Ensure Ollama is reachable at {ollama_host})")
-        return ""
-
 import asyncio
 import numexpr
 from datetime import datetime, timedelta, timezone
@@ -543,12 +490,6 @@ async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_
                 if msg.role != last_role and msg.content and msg.content.strip():
                     messages.append({"role": msg.role, "content": msg.content})
                     last_role = msg.role
-            
-            # 2. Retrieve semantic context from long-term memory (ChromaDB)
-            long_term_context = query_vector_db_sync(prompt)
-            if long_term_context and long_term_context.strip():
-                # Add long-term context as a separate system message if it's not empty
-                messages.insert(1, {"role": "system", "content": f"Relevant long-term memories from previous conversations:\n{long_term_context}"})
         
         # Ensure user message is not empty and role alternates
         if prompt and prompt.strip():
@@ -604,9 +545,6 @@ async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_
                             db_inner.add(assistant_entry)
                             db_inner.commit()
                             db_inner.close()
-                            
-                            save_to_vector_db_sync(user_id or "unknown", channel_id, "user", prompt or "Follow-up")
-                            save_to_vector_db_sync(user_id or "unknown", channel_id, "assistant", full_response_content)
                 
                 elif response.status == 400:
                     error_body = await response.text()
