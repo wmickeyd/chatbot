@@ -562,8 +562,9 @@ async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_
                     logger.error(f"Ollama error: {response.status} - {error_body}")
                     yield {"type": "content", "content": f"Error: {response.status}"}
 
-    async for chunk in perform_request(payload):
-        yield chunk
+    try:
+        async for chunk in perform_request(payload):
+            yield chunk
     except Exception as e:
         logger.error(f"Error calling Ollama: {e}")
         yield {"type": "content", "content": f"Error: {e}"}
