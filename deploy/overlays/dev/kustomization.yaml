@@ -13,23 +13,23 @@ patches:
     kind: Deployment
     name: chatbot
   patch: |-
-    - op: add
-      path: /spec/template/spec/containers/0/env/-
-      value:
-        name: OLLAMA_URL
-        value: "http://192.168.86.27:11434/api/generate"
-    - op: add
-      path: /spec/template/spec/containers/0/env/-
-      value:
-        name: OLLAMA_MODEL
-        value: "gemma3n:e4b"
-    - op: add
-      path: /spec/template/spec/containers/0/env/-
-      value:
-        name: OLLAMA_VISION_MODEL
-        value: "moondream"
-    - op: add
-      path: /spec/template/spec/containers/0/env/-
-      value:
-        name: SCRAPER_BASE_URL
-        value: "http://dev-webscraper.webscraper-dev.svc.cluster.local"
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: chatbot
+    spec:
+      template:
+        spec:
+          containers:
+          - name: chatbot
+            env:
+            - name: OLLAMA_URL
+              value: "http://192.168.86.27:11434/api/generate"
+            - name: OLLAMA_MODEL
+              value: "gemma3n:e4b"
+            - name: OLLAMA_VISION_MODEL
+              value: "moondream"
+            - name: SCRAPER_BASE_URL
+              value: "http://dev-webscraper.webscraper-dev.svc.cluster.local"
+            - name: UTILITY_BASE_URL
+              value: "http://dev-utility-api.utility-dev.svc.cluster.local"

@@ -55,4 +55,8 @@ spec:
         - name: UTILITY_BASE_URL
           value: "http://dev-utility-api.utility-dev.svc.cluster.local"
         - name: OLLAMA_URL
-          value: "http://host.docker.internal:11434" # Or your cluster's Ollama service
+          value: "http://host.docker.internal:11434"
+        - name: OLLAMA_MODEL
+          value: "gemma"
+        - name: OLLAMA_VISION_MODEL
+          value: "llava"
