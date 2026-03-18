@@ -114,7 +114,7 @@ bot = commands.Bot(command_prefix='!', intents=intents, heartbeat_timeout=120.0)
 # Memory storage (channel_id -> list of messages) is now handled via SQLAlchemy
 
 async def search_web(query):
-    """Calls the webscraper API to search the web for a query with domain filtering."""
+    """Calls the utility API to search the web for a query with domain filtering."""
     params = {"q": query}
     timeout = aiohttp.ClientTimeout(total=60)
     blacklist = ["grokipedia.com", "pinterest.com", "facebook.com", "instagram.com", "twitter.com", "tiktok.com"]
@@ -142,7 +142,7 @@ async def search_web(query):
         return f"Could not search right now. (Error: {e})"
 
 async def read_url(url):
-    """Calls the webscraper API to read a URL's text content."""
+    """Calls the heavy scraper API to read a URL's text content."""
     params = {"url": url}
     timeout = aiohttp.ClientTimeout(total=60)
     try:
@@ -182,7 +182,7 @@ async def track_lego_logic(url):
         return f"Could not reach tracking tool. Error: {e}"
 
 async def get_finance_data(symbol):
-    """Calls the webscraper API to get stock or crypto prices."""
+    """Calls the utility API to get stock or crypto prices."""
     params = {"symbol": symbol}
     timeout = aiohttp.ClientTimeout(total=60)
     try:
@@ -198,7 +198,7 @@ async def get_finance_data(symbol):
         return f"Could not get financial data. (Error: {e})"
 
 async def search_images(query):
-    """Calls the webscraper API to search for images."""
+    """Calls the utility API to search for images."""
     params = {"q": query}
     timeout = aiohttp.ClientTimeout(total=60)
     try:
@@ -216,7 +216,7 @@ async def search_images(query):
         return f"Could not search for images. (Error: {e})"
 
 async def get_weather(location):
-    """Calls the webscraper API to get weather data."""
+    """Calls the utility API to get weather data."""
     params = {"location": location}
     timeout = aiohttp.ClientTimeout(total=60)
     try:
@@ -232,7 +232,7 @@ async def get_weather(location):
         return f"Could not get weather data. (Error: {e})"
 
 async def get_news(query):
-    """Calls the webscraper API to get the latest news on a topic."""
+    """Calls the utility API to get the latest news on a topic."""
     params = {"q": query}
     timeout = aiohttp.ClientTimeout(total=60)
     try:
@@ -250,7 +250,7 @@ async def get_news(query):
         return f"Could not get news. (Error: {e})"
 
 async def read_reddit(url):
-    """Calls the webscraper API to read a Reddit thread."""
+    """Calls the utility API to read a Reddit thread."""
     params = {"url": url}
     timeout = aiohttp.ClientTimeout(total=60)
     try:
