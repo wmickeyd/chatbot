@@ -336,7 +336,7 @@ class LLMCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def ask_ollama(self, prompt, channel_id=None, user_id=None, images=None, system_override=None, current_messages=None):
+    async def ask_ollama(self, prompt, channel_id=None, user_id=None, images=None, system_override=None, current_messages=None, skip_tools=False):
         db = database.SessionLocal()
         model = OLLAMA_MODEL
         if user_id:
@@ -376,10 +376,9 @@ class LLMCog(commands.Cog):
                 if images: user_msg["images"] = images
                 messages.append(user_msg)
 
-        # IMPORTANT: Disable tools if images are present. 
-        # Many multimodal models (like Gemma 3) struggle to process tools and images in the same request,
-        # and this also avoids the 400 "does not support tools" error for multimodal requests.
-        use_tools = TOOLS if not images else []
+        # IMPORTANT: Disable tools if images are present or if it's a simple query.
+        # This significantly improves performance for basic chat.
+        use_tools = TOOLS if (not images and not skip_tools) else []
 
         payload = {
             "model": model,
@@ -476,15 +475,29 @@ class LLMCog(commands.Cog):
                     for turn in range(3):
                         found_tool_call = False
                         current_prompt = prompt if turn == 0 else None
-                        async for chunk_data in self.ask_ollama(current_prompt, channel_id=message.channel.id, user_id=message.author.id, images=images if turn == 0 else None, current_messages=active_messages):
+                        
+                        # Speed Optimization: If it's a simple 'hello' or short message (under 20 chars),
+                        # don't send the heavy TOOLS list to Ollama. This significantly speeds up simple chats.
+                        is_simple_query = prompt and len(prompt) < 20 and not any(keyword in prompt.lower() for keyword in ["weather", "stock", "price", "news", "search", "track"])
+                        
+                        async for chunk_data in self.ask_ollama(
+                            current_prompt, 
+                            channel_id=message.channel.id, 
+                            user_id=message.author.id, 
+                            images=images if turn == 0 else None, 
+                            current_messages=active_messages,
+                            skip_tools=is_simple_query
+                        ):
                             if chunk_data["type"] == "content":
                                 chunk = chunk_data["content"]
                                 response_text += chunk
-                                if len(response_text) < 100: continue
+                                
                                 if chunk.strip():
                                     if not msg_to_edit:
-                                        msg_to_edit = await message.channel.send(response_text[:2000])
-                                    elif (datetime.now().timestamp() - last_update_time) > 1.5:
+                                        # Reduce buffer to 20 chars for faster visual feedback
+                                        if len(response_text) > 20:
+                                            msg_to_edit = await message.channel.send(response_text[:2000])
+                                    elif (datetime.now().timestamp() - last_update_time) > 1.0: # Faster updates
                                         await msg_to_edit.edit(content=response_text[:2000])
                                         last_update_time = datetime.now().timestamp()
                             elif chunk_data["type"] == "tool_calls":
