@@ -536,18 +536,29 @@ async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_
         if channel_id and not images:
             # 1. Retrieve last 10 messages from SQL database for current context
             history = db.query(models.ChatMessage).filter(models.ChatMessage.channel_id == str(channel_id)).order_by(models.ChatMessage.timestamp.desc()).limit(10).all()
+            
+            # Ensure we don't have consecutive messages with the same role (Ollama strictness)
+            last_role = "system"
             for msg in reversed(history):
-                messages.append({"role": msg.role, "content": msg.content})
+                if msg.role != last_role and msg.content and msg.content.strip():
+                    messages.append({"role": msg.role, "content": msg.content})
+                    last_role = msg.role
             
             # 2. Retrieve semantic context from long-term memory (ChromaDB)
             long_term_context = query_vector_db_sync(prompt)
-            if long_term_context:
+            if long_term_context and long_term_context.strip():
+                # Add long-term context as a separate system message if it's not empty
                 messages.insert(1, {"role": "system", "content": f"Relevant long-term memories from previous conversations:\n{long_term_context}"})
         
-        user_msg = {"role": "user", "content": prompt}
-        if images:
-            user_msg["images"] = images
-        messages.append(user_msg)
+        # Ensure user message is not empty and role alternates
+        if prompt and prompt.strip():
+            user_msg = {"role": "user", "content": prompt}
+            if images:
+                user_msg["images"] = images
+            messages.append(user_msg)
+        else:
+            # Fallback if prompt is empty (e.g. just an image)
+            messages.append({"role": "user", "content": "Analyze this image." if images else "Hello"})
 
     payload = {
         "model": model,
