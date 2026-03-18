@@ -560,6 +560,7 @@ async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_
             # Fallback if prompt is empty (e.g. just an image)
             messages.append({"role": "user", "content": "Analyze this image." if images else "Hello"})
 
+    # Define the base payload
     payload = {
         "model": model,
         "messages": messages,
@@ -567,14 +568,12 @@ async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_
         "tools": TOOLS if not images else [] 
     }
 
-    # Switch to /api/chat for better tool support
-    chat_url = OLLAMA_URL.replace("/generate", "/chat")
-    
-    timeout = aiohttp.ClientTimeout(total=120)
-    try:
+    async def perform_request(current_payload):
+        chat_url = OLLAMA_URL.replace("/generate", "/chat")
+        timeout = aiohttp.ClientTimeout(total=120)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            logger.info(f"Sending request to Ollama: {model} (Tools: {'Yes' if payload.get('tools') else 'No'})")
-            async with session.post(chat_url, json=payload) as response:
+            logger.info(f"Sending request to Ollama: {model} (Tools: {'Yes' if current_payload.get('tools') else 'No'})")
+            async with session.post(chat_url, json=current_payload) as response:
                 if response.status == 200:
                     full_response_content = ""
                     tool_calls = []
@@ -584,44 +583,49 @@ async def ask_ollama(prompt, channel_id=None, user_id=None, images=None, system_
                         try:
                             data = json.loads(line.decode('utf-8'))
                             msg_chunk = data.get('message', {})
-                            
-                            # Handle tool calls
                             if msg_chunk.get('tool_calls'):
                                 tool_calls.extend(msg_chunk['tool_calls'])
                                 continue
-                                
                             chunk = msg_chunk.get('content', '')
                             full_response_content += chunk
                             if chunk:
                                 yield {"type": "content", "content": chunk, "full_content": full_response_content}
-                            
-                            if data.get('done'):
-                                break
-                        except json.JSONDecodeError:
-                            # Sometimes chunks are split or joined incorrectly
-                            logger.warning(f"Failed to decode JSON line: {line}")
-                            continue
+                            if data.get('done'): break
+                        except json.JSONDecodeError: continue
                     
                     if tool_calls:
                         yield {"type": "tool_calls", "calls": tool_calls, "messages": messages}
                     else:
-                        # Only update memory on final response
                         if channel_id and not images:
+                            db_inner = database.SessionLocal()
                             user_entry = models.ChatMessage(channel_id=str(channel_id), role="user", content=prompt or "Follow-up")
                             assistant_entry = models.ChatMessage(channel_id=str(channel_id), role="assistant", content=full_response_content)
-                            db.add(user_entry)
-                            db.add(assistant_entry)
-                            db.commit()
+                            db_inner.add(user_entry)
+                            db_inner.add(assistant_entry)
+                            db_inner.commit()
+                            db_inner.close()
                             
-                            # Also save to vector DB for long-term semantic retrieval
                             save_to_vector_db_sync(user_id or "unknown", channel_id, "user", prompt or "Follow-up")
                             save_to_vector_db_sync(user_id or "unknown", channel_id, "assistant", full_response_content)
-                            
-                            logger.info(f"Persistent memory updated for channel {channel_id}")
+                
+                elif response.status == 400:
+                    error_body = await response.text()
+                    if "does not support tools" in error_body and "tools" in current_payload:
+                        logger.warning(f"Model {model} does not support tools. Retrying without tools...")
+                        new_payload = current_payload.copy()
+                        del new_payload["tools"]
+                        async for chunk in perform_request(new_payload):
+                            yield chunk
+                    else:
+                        logger.error(f"Ollama error: {response.status} - {error_body}")
+                        yield {"type": "content", "content": f"Error: {response.status}. {error_body}"}
                 else:
                     error_body = await response.text()
                     logger.error(f"Ollama error: {response.status} - {error_body}")
-                    yield {"type": "content", "content": f"Error: Ollama returned status {response.status}. {error_body}"}
+                    yield {"type": "content", "content": f"Error: {response.status}"}
+
+    async for chunk in perform_request(payload):
+        yield chunk
     except Exception as e:
         logger.error(f"Error calling Ollama: {e}")
         yield {"type": "content", "content": f"Error: {e}"}
