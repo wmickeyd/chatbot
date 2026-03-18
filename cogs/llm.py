@@ -492,6 +492,37 @@ class LLMCog(commands.Cog):
                                 chunk = chunk_data["content"]
                                 response_text += chunk
                                 
+                                # MANUAL TOOL CALL DETECTION:
+                                # If the model outputs a pseudo-tool call as text (e.g. weather.search(location="...")),
+                                # we catch it here, treat it as a tool call, and reset the buffer.
+                                if "get_weather(" in response_text or "search_web(" in response_text or "track_lego_set(" in response_text:
+                                    logger.warning(f"Detected pseudo-tool call in text: {response_text}. Converting to execution.")
+                                    # Basic regex to extract func and args from string like: get_weather(location="Harrison, NJ")
+                                    match = re.search(r'(\w+)\((.*)\)', response_text)
+                                    if match:
+                                        found_tool_call = True
+                                        func_name = match.group(1)
+                                        args_str = match.group(2)
+                                        # Simple parsing for location="..." or query="..."
+                                        args = {}
+                                        arg_match = re.search(r'(\w+)=["\'](.*?)["\']', args_str)
+                                        if arg_match:
+                                            args[arg_match.group(1)] = arg_match.group(2)
+                                        
+                                        # Reset response_text and prepare for turn continuation
+                                        response_text = ""
+                                        
+                                        # Execute the manual tool
+                                        tool_result = "Unknown tool."
+                                        if func_name == "search_web": tool_result = await search_web(args.get("query") or args.get("location"))
+                                        elif func_name == "get_weather": tool_result = await get_weather(args.get("location") or args.get("query"))
+                                        elif func_name == "track_lego_set": tool_result = await track_lego_logic(args.get("url"))
+                                        
+                                        if active_messages is None: active_messages = []
+                                        active_messages.append({"role": "assistant", "content": f"I will call {func_name}({args})"})
+                                        active_messages.append({"role": "tool", "content": str(tool_result), "tool_call_id": "manual_id"})
+                                        break # Exit chunk loop to restart the turn with the tool result
+                                
                                 if chunk.strip():
                                     if not msg_to_edit:
                                         # Reduce buffer to 20 chars for faster visual feedback
