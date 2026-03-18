@@ -493,35 +493,59 @@ class LLMCog(commands.Cog):
                                 response_text += chunk
                                 
                                 # MANUAL TOOL CALL DETECTION:
-                                # If the model outputs a pseudo-tool call as text (e.g. weather.search(location="...")),
-                                # we catch it here, treat it as a tool call, and reset the buffer.
-                                if "get_weather(" in response_text or "search_web(" in response_text or "track_lego_set(" in response_text:
-                                    logger.warning(f"Detected pseudo-tool call in text: {response_text}. Converting to execution.")
-                                    # Basic regex to extract func and args from string like: get_weather(location="Harrison, NJ")
-                                    match = re.search(r'(\w+)\((.*)\)', response_text)
+                                # Catch patterns like: get_weather(...), tools.search(...), weather.get(...)
+                                if "(" in response_text and ")" in response_text and any(word in response_text.lower() for word in ["weather", "search", "track", "calc", "finance", "price"]):
+                                    logger.warning(f"Detected potential pseudo-tool call in text: {response_text}")
+                                    
+                                    # Regex to catch [prefix.]function(args)
+                                    # Groups: 1=prefix(optional), 2=function_name, 3=arguments
+                                    match = re.search(r'(\w+\.)?(\w+)\((.*)\)', response_text)
                                     if match:
                                         found_tool_call = True
-                                        func_name = match.group(1)
-                                        args_str = match.group(2)
-                                        # Simple parsing for location="..." or query="..."
-                                        args = {}
-                                        arg_match = re.search(r'(\w+)=["\'](.*?)["\']', args_str)
-                                        if arg_match:
-                                            args[arg_match.group(1)] = arg_match.group(2)
+                                        raw_func_name = match.group(2).lower()
+                                        args_str = match.group(3)
                                         
-                                        # Reset response_text and prepare for turn continuation
-                                        response_text = ""
+                                        # Map model's likely names to our actual function names
+                                        func_mapping = {
+                                            "search": "search_web",
+                                            "search_web": "search_web",
+                                            "get_weather": "get_weather",
+                                            "weather": "get_weather",
+                                            "track": "track_lego_set",
+                                            "track_lego_set": "track_lego_set",
+                                            "calculate": "calculate_logic",
+                                            "calc": "calculate_logic",
+                                            "finance": "get_stock_crypto_price",
+                                            "get_stock_crypto_price": "get_stock_crypto_price"
+                                        }
                                         
-                                        # Execute the manual tool
-                                        tool_result = "Unknown tool."
-                                        if func_name == "search_web": tool_result = await search_web(args.get("query") or args.get("location"))
-                                        elif func_name == "get_weather": tool_result = await get_weather(args.get("location") or args.get("query"))
-                                        elif func_name == "track_lego_set": tool_result = await track_lego_logic(args.get("url"))
-                                        
-                                        if active_messages is None: active_messages = []
-                                        active_messages.append({"role": "assistant", "content": f"I will call {func_name}({args})"})
-                                        active_messages.append({"role": "tool", "content": str(tool_result), "tool_call_id": "manual_id"})
-                                        break # Exit chunk loop to restart the turn with the tool result
+                                        actual_func = func_mapping.get(raw_func_name)
+                                        if actual_func:
+                                            # Parse arguments (e.g., query="...", location="...")
+                                            args = {}
+                                            arg_matches = re.findall(r'(\w+)=["\'](.*?)["\']', args_str)
+                                            for k, v in arg_matches:
+                                                args[k] = v
+                                            
+                                            # If regex parsing failed, try taking the whole string inside parens as the primary arg
+                                            if not args and args_str.strip():
+                                                clean_val = args_str.strip().strip('"\'')
+                                                args["query"] = clean_val
+                                                args["location"] = clean_val
+                                                args["url"] = clean_val
+                                            
+                                            response_text = "" # CLEAR the pseudo-code from the user's view
+                                            
+                                            # Execute the matched tool
+                                            tool_result = "Unknown tool."
+                                            if actual_func == "search_web": tool_result = await search_web(args.get("query") or args.get("location"))
+                                            elif actual_func == "get_weather": tool_result = await get_weather(args.get("location") or args.get("query"))
+                                            elif actual_func == "track_lego_set": tool_result = await track_lego_logic(args.get("url") or args.get("query"))
+                                            
+                                            if active_messages is None: active_messages = []
+                                            active_messages.append({"role": "assistant", "content": f"I will call {actual_func}({args})"})
+                                            active_messages.append({"role": "tool", "content": str(tool_result), "tool_call_id": "manual_id"})
+                                            break # Restart turn with the data
                                 
                                 if chunk.strip():
                                     if not msg_to_edit:
