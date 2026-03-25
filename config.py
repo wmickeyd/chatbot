@@ -5,7 +5,7 @@ load_dotenv(dotenv_path="deploy/base/.env")
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Agent Orchestrator
-ORCHESTRATOR_BASE_URL = os.getenv('ORCHESTRATOR_BASE_URL', 'http://agent-orchestrator.ai-services.svc.cluster.local:8002')
+ORCHESTRATOR_BASE_URL = os.getenv('ORCHESTRATOR_BASE_URL', 'http://dev-agent-orchestrator.ai-services.svc.cluster.local:8002')
 ORCHESTRATOR_URL = f"{ORCHESTRATOR_BASE_URL}/v1/chat"
 
 # Downstream APIs (Keep these if cogs still need them directly, but LLM will use Orchestrator)
