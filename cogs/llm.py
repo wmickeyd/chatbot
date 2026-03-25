@@ -16,7 +16,7 @@ class LLMCog(commands.Cog):
         self.bot = bot
 
     async def ask_orchestrator(self, session_id, user_id, prompt, attachments=None):
-        """Calls the Agent Orchestrator SSE endpoint."""
+        """Calls the Agent Orchestrator SSE endpoint with heartbeat support."""
         payload = {
             "session_id": str(session_id),
             "user_id": str(user_id),
@@ -24,32 +24,39 @@ class LLMCog(commands.Cog):
             "attachments": attachments
         }
         
-        timeout = aiohttp.ClientTimeout(total=300) # Long timeout for agent loops
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            logger.info(f"Connecting to Orchestrator for session {session_id}")
-            async with session.post(ORCHESTRATOR_URL, json=payload) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    yield {"event": "error", "data": {"message": f"Orchestrator error {response.status}: {error_text}"}}
-                    return
+        timeout = aiohttp.ClientTimeout(total=600, sock_read=60) # High total, but expect data frequently
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                logger.info(f"Connecting to Orchestrator for session {session_id}")
+                async with session.post(ORCHESTRATOR_URL, json=payload) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        yield {"event": "error", "data": {"message": f"Orchestrator error {response.status}: {error_text}"}}
+                        return
 
-                # SSE parsing loop
-                buffer = ""
-                async for line in response.content:
-                    if not line: continue
-                    decoded_line = line.decode('utf-8').strip()
-                    
-                    if decoded_line.startswith("event: "):
-                        current_event = decoded_line.replace("event: ", "")
-                        continue
-                    
-                    if decoded_line.startswith("data: "):
-                        data_str = decoded_line.replace("data: ", "")
-                        try:
-                            data = json.loads(data_str)
-                            yield {"event": current_event, "data": data}
-                        except json.JSONDecodeError:
-                            continue
+                    # SSE parsing loop
+                    current_event = None
+                    async for line in response.content:
+                        if not line: continue
+                        decoded_line = line.decode('utf-8').strip()
+                        
+                        if decoded_line.startswith("event: "):
+                            current_event = decoded_line.replace("event: ", "")
+                        elif decoded_line.startswith("data: "):
+                            data_str = decoded_line.replace("data: ", "")
+                            try:
+                                data = json.loads(data_str)
+                                yield {"event": current_event, "data": data}
+                            except json.JSONDecodeError:
+                                continue
+                        elif not decoded_line: # End of event block
+                            current_event = None
+        except aiohttp.ClientError as e:
+            logger.error(f"SSE Connection Error: {e}")
+            yield {"event": "error", "data": {"message": f"Connection lost: {str(e)}"}}
+        except Exception as e:
+            logger.error(f"Unexpected SSE Error: {e}")
+            yield {"event": "error", "data": {"message": f"Critical error: {str(e)}"}}
 
     @commands.Cog.listener()
     async def on_message(self, message):
