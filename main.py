@@ -4,7 +4,7 @@ import os
 import logging
 import asyncio
 from datetime import datetime, timedelta, timezone
-from config import DISCORD_TOKEN, OLLAMA_MODEL
+from config import DISCORD_TOKEN
 import database, models
 
 # Initialize database tables
@@ -24,7 +24,6 @@ bot = commands.Bot(command_prefix='!', intents=intents, heartbeat_timeout=120.0)
 @bot.event
 async def on_ready():
     logger.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
-    logger.info(f'Using Ollama model: {OLLAMA_MODEL}')
     
     # Start background tasks
     bot.loop.create_task(update_health_check())
