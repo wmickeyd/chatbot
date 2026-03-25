@@ -10,3 +10,8 @@ ORCHESTRATOR_URL = os.getenv('ORCHESTRATOR_URL', 'http://agent-orchestrator.ai-s
 # Downstream APIs (Keep these if cogs still need them directly, but LLM will use Orchestrator)
 SCRAPER_BASE_URL = os.getenv('SCRAPER_BASE_URL', 'http://dev-webscraper.webscraper-dev.svc.cluster.local')
 UTILITY_BASE_URL = os.getenv('UTILITY_BASE_URL', 'http://dev-utility-api.utility-dev.svc.cluster.local')
+
+SCRAPER_URL = f"{SCRAPER_BASE_URL}/read"
+TRACK_URL = f"{SCRAPER_BASE_URL}/track"
+SCRAPE_URL = f"{SCRAPER_BASE_URL}/scrape"
+TRACKED_URL = f"{SCRAPER_BASE_URL}/tracked"
