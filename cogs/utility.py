@@ -4,7 +4,7 @@ import wikipediaapi
 import asyncio
 import logging
 import aiohttp
-from config import ORCHESTRATOR_BASE_URL, WEATHER_URL, FINANCE_URL
+from config import ORCHESTRATOR_BASE_URL, WEATHER_URL, FINANCE_URL, DEFINE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -82,19 +82,69 @@ class Utility(commands.Cog):
             except Exception as e:
                 await ctx.send(f"Could not reach finance service: {e}")
 
+    @commands.command(name="define")
+    async def define(self, ctx, word: str):
+        """Fetches the definition of a word (Bypasses Agent)."""
+        async with ctx.typing():
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(DEFINE_URL, params={"word": word}) as r:
+                        if r.status == 200:
+                            data = await r.json()
+                            embed = discord.Embed(title=f"Definition: {data['word']}", color=discord.Color.green())
+                            embed.add_field(name="Phonetic", value=data.get('phonetic', 'N/A'))
+                            embed.add_field(name="Part of Speech", value=data.get('part_of_speech', 'N/A'))
+                            embed.add_field(name="Definition", value=data.get('definition', 'N/A'), inline=False)
+                            await ctx.send(embed=embed)
+                        elif r.status == 404:
+                            await ctx.send(f"Could not find a definition for `{word}`.")
+                        else:
+                            await ctx.send(f"Error fetching definition: {r.status}")
+            except Exception as e:
+                await ctx.send(f"Could not reach dictionary service: {e}")
+
+    @commands.command(name="poll")
+    async def poll(self, ctx, question: str, *options):
+        """Creates a poll with up to 10 options."""
+        if not options:
+            embed = discord.Embed(title=f"📊 {question}", color=discord.Color.blue())
+            msg = await ctx.send(embed=embed)
+            await msg.add_reaction("✅")
+            await msg.add_reaction("❌")
+            return
+        if len(options) > 10:
+            return await ctx.send("You can only have up to 10 options.")
+        reactions = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        description = "\n".join([f"{reactions[i]} {options[i]}" for i in range(len(options))])
+        embed = discord.Embed(title=f"📊 {question}", description=description, color=discord.Color.blue())
+        msg = await ctx.send(embed=embed)
+        for i in range(len(options)):
+            await msg.add_reaction(reactions[i])
+
+    @commands.command(name="roll")
+    async def roll(self, ctx, dice: str = "1d20"):
+        """Rolls dice in the format NdN (e.g., 2d20)."""
+        try:
+            import random
+            num, sides = map(int, dice.lower().split('d'))
+            if num > 100 or sides > 1000:
+                return await ctx.send("Dice count/sides too large!")
+            rolls = [random.randint(1, sides) for _ in range(num)]
+            await ctx.send(f"🎲 Rolling {dice}: `{' + '.join(map(str, rolls))} = {sum(rolls)}`")
+        except ValueError:
+            await ctx.send("Usage: `!roll NdN` (e.g., `!roll 2d6`)")
+
     @commands.command(name="set")
     async def _set(self, ctx, key: str = None, value: str = None):
         """Update your personal bot settings via the Orchestrator."""
         if not key or not value:
             return await ctx.send("Usage: `!set <key> <value>`\nKeys: `model`, `unit`, `lang`")
-        
         url = f"{ORCHESTRATOR_BASE_URL}/v1/users/{ctx.author.id}"
         payload = {}
         if key.lower() == 'model': payload['preferred_model'] = value
         elif key.lower() == 'unit': payload['preferred_temp_unit'] = value
         elif key.lower() == 'lang': payload['preferred_lang'] = value
         else: return await ctx.send(f"Unknown setting: {key}")
-
         async with aiohttp.ClientSession() as session:
             async with session.patch(url, json=payload) as r:
                 if r.status == 200:
@@ -122,15 +172,16 @@ class Utility(commands.Cog):
     async def _commands(self, ctx):
         """Lists all available bot commands."""
         embed = discord.Embed(title="Kelor Bot Commands", color=discord.Color.blue())
-        embed.add_field(name="!wiki <query>", value="Search Wikipedia.", inline=True)
-        embed.add_field(name="!weather <loc>", value="Direct weather report.", inline=True)
-        embed.add_field(name="!stock <sym>", value="Direct price check.", inline=True)
-        embed.add_field(name="!set <key> <val>", value="Update profile.", inline=True)
-        embed.add_field(name="!profile", value="View settings.", inline=True)
-        embed.add_field(name="!track <url>", value="Track a LEGO set price.", inline=True)
-        embed.add_field(name="!tracked", value="List tracked LEGO sets.", inline=True)
-        embed.add_field(name="!play <url>", value="Play music.", inline=True)
-        embed.add_field(name="Mention @Kelor", value="Ask anything (Agent-powered).", inline=False)
+        embed.add_field(name="!wiki <query>", value="Wikipedia.", inline=True)
+        embed.add_field(name="!weather <loc>", value="Weather.", inline=True)
+        embed.add_field(name="!stock <sym>", value="Stock/Crypto.", inline=True)
+        embed.add_field(name="!define <word>", value="Dictionary.", inline=True)
+        embed.add_field(name="!poll <q> [opts]", value="Poll.", inline=True)
+        embed.add_field(name="!roll <dice>", value="Dice.", inline=True)
+        embed.add_field(name="!purge <num>", value="Delete msgs.", inline=True)
+        embed.add_field(name="!userinfo", value="User details.", inline=True)
+        embed.add_field(name="!uptime", value="Bot uptime.", inline=True)
+        embed.add_field(name="Mention @Kelor", value="Agent (AI).", inline=False)
         await ctx.send(embed=embed)
 
 async def setup(bot):

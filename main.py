@@ -92,6 +92,7 @@ async def main():
         await bot.load_extension('cogs.tracking')
         await bot.load_extension('cogs.music')
         await bot.load_extension('cogs.llm')
+        await bot.load_extension('cogs.management')
         
         if not DISCORD_TOKEN:
             logger.error("No DISCORD_TOKEN found in environment variables!")
