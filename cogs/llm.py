@@ -40,17 +40,22 @@ class LLMCog(commands.Cog):
                         if not line: continue
                         decoded_line = line.decode('utf-8').strip()
                         
-                        if decoded_line.startswith("event: "):
-                            current_event = decoded_line.replace("event: ", "")
-                        elif decoded_line.startswith("data: "):
-                            data_str = decoded_line.replace("data: ", "")
+                        if not decoded_line: # End of event block
+                            current_event = None
+                            continue
+                        
+                        if decoded_line.startswith("event:"):
+                            current_event = decoded_line[6:].strip()
+                        elif decoded_line.startswith("data:"):
+                            data_str = decoded_line[5:].strip()
                             try:
                                 data = json.loads(data_str)
                                 yield {"event": current_event, "data": data}
                             except json.JSONDecodeError:
+                                logger.warning(f"Failed to decode SSE data: {data_str}")
                                 continue
-                        elif not decoded_line: # End of event block
-                            current_event = None
+                        elif decoded_line.startswith(":"): # Heartbeat or comment
+                            yield {"event": "heartbeat", "data": {"type": "keep-alive"}}
         except aiohttp.ClientError as e:
             logger.error(f"SSE Connection Error: {e}")
             yield {"event": "error", "data": {"message": f"Connection lost: {str(e)}"}}
