@@ -5,6 +5,7 @@ import logging
 import aiohttp
 import json
 import re
+import ast
 from datetime import datetime
 from config import ORCHESTRATOR_URL
 import database, models
@@ -24,7 +25,7 @@ class LLMCog(commands.Cog):
             "attachments": attachments
         }
         
-        timeout = aiohttp.ClientTimeout(total=600, sock_read=60) # High total, but expect data frequently
+        timeout = aiohttp.ClientTimeout(total=600, sock_read=60)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 logger.info(f"Connecting to Orchestrator for session {session_id}")
@@ -34,27 +35,33 @@ class LLMCog(commands.Cog):
                         yield {"event": "error", "data": {"message": f"Orchestrator error {response.status}: {error_text}"}}
                         return
 
-                    # SSE parsing loop
                     current_event = None
-                    async for line in response.content:
-                        if not line: continue
+                    data_buffer = []
+                    while True:
+                        line = await response.content.readline()
+                        if not line:
+                            break
                         decoded_line = line.decode('utf-8').strip()
-                        
-                        if not decoded_line: # End of event block
+
+                        if not decoded_line:
+                            if data_buffer:
+                                data_str = "\n".join(data_buffer)
+                                try:
+                                    data = json.loads(data_str)
+                                    yield {"event": current_event, "data": data}
+                                except json.JSONDecodeError:
+                                    try:
+                                        data = ast.literal_eval(data_str)
+                                        yield {"event": current_event, "data": data}
+                                    except Exception as e:
+                                        logger.warning(f"Failed to decode SSE data: {data_str}. Error: {e}")
                             current_event = None
-                            continue
-                        
-                        if decoded_line.startswith("event:"):
+                            data_buffer = []
+                        elif decoded_line.startswith("event:"):
                             current_event = decoded_line[6:].strip()
                         elif decoded_line.startswith("data:"):
-                            data_str = decoded_line[5:].strip()
-                            try:
-                                data = json.loads(data_str)
-                                yield {"event": current_event, "data": data}
-                            except json.JSONDecodeError:
-                                logger.warning(f"Failed to decode SSE data: {data_str}")
-                                continue
-                        elif decoded_line.startswith(":"): # Heartbeat or comment
+                            data_buffer.append(decoded_line[5:].strip())
+                        elif decoded_line.startswith(":"):
                             yield {"event": "heartbeat", "data": {"type": "keep-alive"}}
         except aiohttp.ClientError as e:
             logger.error(f"SSE Connection Error: {e}")
@@ -68,12 +75,10 @@ class LLMCog(commands.Cog):
         if message.author == self.bot.user: return
         if message.content.startswith(self.bot.command_prefix): return
 
-        # Respond to mentions or DMs
         if self.bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
             async with message.channel.typing():
                 prompt = re.sub(f'<@!?{self.bot.user.id}>', '', message.content).strip()
                 
-                # Gather attachments to pass to orchestrator
                 attachments = []
                 for a in message.attachments:
                     attachments.append({"url": a.url, "filename": a.filename})
@@ -89,35 +94,32 @@ class LLMCog(commands.Cog):
                         data = event_data["data"]
 
                         if event == "status":
-                            status_text = f"*({data['state']}...)*"
-                        
+                            status_text = f"*({data.get('state', 'processing')}...)*"
                         elif event == "content":
-                            response_text += data["delta"]
-                        
-                        elif event == "tool_result":
-                            # Optionally show tool activity in a small way
-                            pass
-
+                            response_text += data.get("delta", "")
                         elif event == "error":
-                            response_text = f"❌ Error: {data['message']}"
+                            response_text = f"❌ Error: {data.get('message', 'Unknown error')}"
+                        elif event == "final_answer":
+                            response_text = data.get("content", response_text)
+                            status_text = ""
 
-                        # Update Discord message with debounce
                         if response_text.strip() or status_text:
                             display_text = f"{response_text}\n\n{status_text}" if status_text and event != "final_answer" else response_text
-                            
+                            if not display_text.strip(): continue
+
                             if not msg_to_edit:
-                                if len(display_text) > 10: # Small buffer
+                                if len(display_text) > 5:
                                     msg_to_edit = await message.channel.send(display_text[:2000])
                             elif (datetime.now().timestamp() - last_update_time) > 1.2:
                                 await msg_to_edit.edit(content=display_text[:2000])
                                 last_update_time = datetime.now().timestamp()
 
                         if event == "final_answer":
-                            status_text = "" # Clear status on finish
                             if msg_to_edit:
                                 await msg_to_edit.edit(content=response_text[:2000])
                             else:
                                 await message.channel.send(response_text[:2000])
+                            break
 
                 except Exception as e:
                     logger.error(f"Thin Client Error: {e}")
