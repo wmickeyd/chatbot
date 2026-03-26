@@ -23,11 +23,9 @@ patches:
           containers:
           - name: chatbot
             env:
-            - name: OLLAMA_URL
-              value: "http://192.168.86.27:11434/api/generate"
-            - name: OLLAMA_MODEL
-              value: "gemma3n:e4b"
             - name: SCRAPER_BASE_URL
-              value: "http://dev-webscraper.webscraper-dev.svc.cluster.local"
+              value: "http://dev-webscraper.webscraper-dev.svc.cluster.local:8000"
             - name: UTILITY_BASE_URL
-              value: "http://dev-utility-api.utility-dev.svc.cluster.local"
+              value: "http://dev-utility-api.utility-dev.svc.cluster.local:8001"
+            - name: ORCHESTRATOR_BASE_URL
+              value: "http://dev-agent-orchestrator.ai-services.svc.cluster.local:8002"
