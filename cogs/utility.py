@@ -4,13 +4,28 @@ import wikipediaapi
 import asyncio
 import logging
 import aiohttp
-from config import ORCHESTRATOR_BASE_URL, WEATHER_URL, FINANCE_URL, DEFINE_URL
+from config import ORCHESTRATOR_BASE_URL
 
 logger = logging.getLogger(__name__)
 
 class Utility(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    async def _ask(self, ctx, prompt: str) -> str:
+        """Sends a prompt to the orchestrator and returns the full response text."""
+        llm = self.bot.get_cog('LLMCog')
+        response = ""
+        async for event_data in llm.ask_orchestrator(ctx.channel.id, ctx.author.id, prompt):
+            event = event_data["event"]
+            if event == "content":
+                response += event_data["data"].get("delta", "")
+            elif event == "final_answer":
+                response = event_data["data"].get("content", response)
+                break
+            elif event == "error":
+                return f"Error: {event_data['data'].get('message', 'Unknown error')}"
+        return response or "No response."
 
     @commands.command()
     async def wiki(self, ctx, *, query: str):
@@ -45,63 +60,24 @@ class Utility(commands.Cog):
 
     @commands.command(name="weather")
     async def weather(self, ctx, *, location: str):
-        """Directly fetch weather for a location (Bypasses Agent)."""
+        """Fetch weather for a location via Kelor."""
         async with ctx.typing():
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(WEATHER_URL, params={"location": location}) as r:
-                        if r.status == 200:
-                            data = await r.json()
-                            embed = discord.Embed(title=f"Weather: {data['location']}", color=discord.Color.blue())
-                            embed.add_field(name="Condition", value=data['condition'])
-                            embed.add_field(name="Temp", value=data['temp'])
-                            embed.add_field(name="Feels Like", value=data['feels_like'])
-                            embed.add_field(name="Humidity", value=data['humidity'])
-                            await ctx.send(embed=embed)
-                        else:
-                            await ctx.send(f"Error fetching weather: {r.status}")
-            except Exception as e:
-                await ctx.send(f"Could not reach weather service: {e}")
+            result = await self._ask(ctx, f"What is the current weather in {location}?")
+            await ctx.send(result[:2000])
 
     @commands.command(name="stock", aliases=["finance", "price"])
     async def stock(self, ctx, symbol: str):
-        """Directly fetch stock/crypto price (Bypasses Agent)."""
+        """Fetch stock/crypto price via Kelor."""
         async with ctx.typing():
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(FINANCE_URL, params={"symbol": symbol}) as r:
-                        if r.status == 200:
-                            data = await r.json()
-                            embed = discord.Embed(title=f"Market Info: {data['symbol']}", color=discord.Color.gold())
-                            embed.add_field(name="Name", value=data['name'])
-                            embed.add_field(name="Price", value=f"{data['price']} {data['currency']}")
-                            embed.set_footer(text=f"Source: {data['source']}")
-                            await ctx.send(embed=embed)
-                        else:
-                            await ctx.send(f"Error fetching finance data: {r.status}")
-            except Exception as e:
-                await ctx.send(f"Could not reach finance service: {e}")
+            result = await self._ask(ctx, f"What is the current price of {symbol}?")
+            await ctx.send(result[:2000])
 
     @commands.command(name="define")
     async def define(self, ctx, word: str):
-        """Fetches the definition of a word (Bypasses Agent)."""
+        """Fetch the definition of a word via Kelor."""
         async with ctx.typing():
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(DEFINE_URL, params={"word": word}) as r:
-                        if r.status == 200:
-                            data = await r.json()
-                            embed = discord.Embed(title=f"Definition: {data['word']}", color=discord.Color.green())
-                            embed.add_field(name="Phonetic", value=data.get('phonetic', 'N/A'))
-                            embed.add_field(name="Part of Speech", value=data.get('part_of_speech', 'N/A'))
-                            embed.add_field(name="Definition", value=data.get('definition', 'N/A'), inline=False)
-                            await ctx.send(embed=embed)
-                        elif r.status == 404:
-                            await ctx.send(f"Could not find a definition for `{word}`.")
-                        else:
-                            await ctx.send(f"Error fetching definition: {r.status}")
-            except Exception as e:
-                await ctx.send(f"Could not reach dictionary service: {e}")
+            result = await self._ask(ctx, f"Define the word: {word}")
+            await ctx.send(result[:2000])
 
     @commands.command(name="poll")
     async def poll(self, ctx, question: str, *options):

@@ -6,16 +6,17 @@ from config import TRACK_URL, TRACKED_URL, SCRAPER_BASE_URL
 
 logger = logging.getLogger(__name__)
 
-async def track_lego_logic(url):
+async def track_lego_logic(url, user_id=None):
     """Internal logic to track a LEGO set, reusable by commands and LLM tools."""
     if "lego.com" not in url.lower():
         return "Please provide a valid LEGO.com URL."
-    
+
     params = {"url": url}
+    if user_id:
+        params["user_id"] = str(user_id)
     timeout = aiohttp.ClientTimeout(total=60)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            # Use TRACK_URL (which is a POST request in the scraper)
             async with session.post(TRACK_URL, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -70,7 +71,7 @@ class Tracking(commands.Cog):
         """Tracks the price of a LEGO set from a URL."""
         logger.info(f"Received !track command from {ctx.author}: {url}")
         async with ctx.typing():
-            result = await track_lego_logic(url)
+            result = await track_lego_logic(url, user_id=ctx.author.id)
             logger.info(f"!track command completed for {ctx.author}: {result}")
             await ctx.send(result)
 
@@ -81,7 +82,7 @@ class Tracking(commands.Cog):
         async with ctx.typing():
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(TRACKED_URL) as response:
+                    async with session.get(TRACKED_URL, params={"user_id": str(ctx.author.id)}) as response:
                         if response.status == 200:
                             data = await response.json()
                             if not data:
