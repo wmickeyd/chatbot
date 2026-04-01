@@ -21,13 +21,16 @@ class Management(commands.Cog):
     async def userinfo(self, ctx, member: discord.Member = None):
         """Displays information about a user."""
         member = member or ctx.author
-        embed = discord.Embed(title=f"User Info: {member.name}", color=member.color)
+        color = member.color if isinstance(member, discord.Member) else discord.Color.blurple()
+        embed = discord.Embed(title=f"User Info: {member.name}", color=color)
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.add_field(name="ID", value=member.id, inline=True)
-        embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d"), inline=True)
+        if isinstance(member, discord.Member) and member.joined_at:
+            embed.add_field(name="Joined Server", value=member.joined_at.strftime("%Y-%m-%d"), inline=True)
         embed.add_field(name="Joined Discord", value=member.created_at.strftime("%Y-%m-%d"), inline=True)
-        roles = [role.mention for role in member.roles if role != ctx.guild.default_role]
-        embed.add_field(name=f"Roles ({len(roles)})", value=" ".join(roles) if roles else "None", inline=False)
+        if isinstance(member, discord.Member) and ctx.guild:
+            roles = [role.mention for role in member.roles if role != ctx.guild.default_role]
+            embed.add_field(name=f"Roles ({len(roles)})", value=" ".join(roles) if roles else "None", inline=False)
         await ctx.send(embed=embed)
 
     @commands.command()
