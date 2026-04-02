@@ -105,8 +105,8 @@ class LLMCog(commands.Cog):
 
                 msg_to_edit = None
                 response_text = ""
+                tool_status = ""
                 last_update_time = 0
-                status_text = ""
 
                 try:
                     async for event_data in self.ask_orchestrator(message.channel.id, message.author.id, prompt, attachments):
@@ -114,25 +114,29 @@ class LLMCog(commands.Cog):
                         data = event_data["data"]
 
                         if event == "status":
-                            status_text = f"*({data.get('state', 'processing')}...)*"
+                            # Only surface meaningful states — ignore "thinking" entirely
+                            state = data.get("state")
+                            if state == "calling_tool":
+                                tool_status = "*🔧 using tools...*"
+                            elif state == "analysing_image":
+                                tool_status = "*🔍 analysing image...*"
                         elif event == "content":
+                            tool_status = ""  # clear once content starts arriving
                             response_text += data.get("delta", "")
                         elif event == "error":
-                            response_text = f"❌ Error: {data.get('message', 'Unknown error')}"
+                            tool_status = ""
+                            response_text = f"❌ {data.get('message', 'Unknown error')}"
                         elif event == "final_answer":
+                            tool_status = ""
                             response_text = data.get("content", response_text)
-                            status_text = ""
 
-                        if response_text.strip() or status_text:
-                            display_text = f"{response_text}\n\n{status_text}" if status_text and event != "final_answer" else response_text
-                            if not display_text.strip(): continue
-
-                            if not msg_to_edit:
-                                if len(display_text) > 5:
-                                    msg_to_edit = await message.channel.send(display_text[:2000])
-                            elif (datetime.now().timestamp() - last_update_time) > 1.2:
-                                await msg_to_edit.edit(content=display_text[:2000])
-                                last_update_time = datetime.now().timestamp()
+                        # Build what to display right now
+                        if response_text.strip():
+                            display_text = f"{response_text}\n\n{tool_status}" if tool_status else response_text
+                        elif tool_status:
+                            display_text = tool_status
+                        else:
+                            continue  # nothing worth posting yet
 
                         if event == "final_answer":
                             if msg_to_edit:
@@ -140,6 +144,13 @@ class LLMCog(commands.Cog):
                             else:
                                 await message.channel.send(response_text[:2000])
                             break
+
+                        if not msg_to_edit:
+                            msg_to_edit = await message.channel.send(display_text[:2000])
+                            last_update_time = datetime.now().timestamp()
+                        elif (datetime.now().timestamp() - last_update_time) > 1.2:
+                            await msg_to_edit.edit(content=display_text[:2000])
+                            last_update_time = datetime.now().timestamp()
 
                 except Exception as e:
                     logger.error(f"Thin Client Error: {e}")
