@@ -1,4 +1,5 @@
 import discord
+from discord import app_commands
 from discord.ext import commands
 import aiohttp
 import logging
@@ -104,6 +105,40 @@ class Tracking(commands.Cog):
             except Exception as e:
                 logger.error(f"Error in !tracked command: {e}")
                 await ctx.send("Could not reach the tracking database.")
+
+    @app_commands.command(name="track", description="Track the price of a LEGO set")
+    @app_commands.describe(url="The LEGO.com product URL")
+    async def slash_track(self, interaction: discord.Interaction, url: str):
+        await interaction.response.defer()
+        result = await track_lego_logic(url, user_id=interaction.user.id)
+        await interaction.followup.send(result)
+
+    @app_commands.command(name="tracked", description="List your tracked LEGO sets")
+    async def slash_tracked(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(TRACKED_URL, params={"user_id": str(interaction.user.id)}) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if not data:
+                            return await interaction.followup.send("You aren't tracking any LEGO sets yet.")
+                        embed = discord.Embed(title="Your Tracked LEGO Sets", color=discord.Color.gold())
+                        for item in data:
+                            price = f"${item['latest_price']}" if item['latest_price'] else "Unknown"
+                            embed.add_field(
+                                name=f"{item['name']} ({item['product_number']})",
+                                value=f"Price: {price}\n[Link]({item['url']})",
+                                inline=False
+                            )
+                        view = TrackedSetsView(data, SCRAPER_BASE_URL)
+                        await interaction.followup.send(embed=embed, view=view)
+                    else:
+                        await interaction.followup.send(f"Error fetching tracked sets: {response.status}")
+        except Exception as e:
+            logger.error(f"Error in /tracked: {e}")
+            await interaction.followup.send("Could not reach the tracking database.")
+
 
 async def setup(bot):
     await bot.add_cog(Tracking(bot))

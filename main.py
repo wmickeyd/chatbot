@@ -24,7 +24,7 @@ bot = commands.Bot(command_prefix='!', intents=intents, heartbeat_timeout=120.0)
 @bot.event
 async def on_ready():
     logger.info(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
-    
+
     # Start background tasks
     bot.loop.create_task(update_health_check())
     bot.loop.create_task(cleanup_old_messages())
@@ -36,6 +36,13 @@ async def on_ready():
         logger.info(f"Opus is loaded: {discord.opus.is_loaded()}")
     except Exception as e:
         logger.error(f"Failed to load Opus: {e}")
+
+    # Sync slash commands
+    try:
+        synced = await bot.tree.sync()
+        logger.info(f"Synced {len(synced)} slash command(s)")
+    except Exception as e:
+        logger.error(f"Failed to sync slash commands: {e}")
 
     logger.info('Bot is ready and all cogs loaded.')
 
