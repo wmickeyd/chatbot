@@ -7,14 +7,18 @@ from config import TRACK_URL, TRACKED_URL, SCRAPER_BASE_URL
 
 logger = logging.getLogger(__name__)
 
-async def track_lego_logic(url, user_id=None):
+async def track_lego_logic(url, user_id=None, target_price=None):
     """Internal logic to track a LEGO set, reusable by commands and LLM tools."""
-    if "lego.com" not in url.lower():
-        return "Please provide a valid LEGO.com URL."
+    supported_retailers = ["lego.com", "amazon.com", "walmart.com", "target.com"]
+    if not any(r in url.lower() for r in supported_retailers):
+        return "Please provide a valid URL from a supported retailer (LEGO, Amazon, Walmart, Target)."
 
     params = {"url": url}
     if user_id:
         params["user_id"] = str(user_id)
+    if target_price:
+        params["target_price"] = target_price
+
     timeout = aiohttp.ClientTimeout(total=60)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -23,7 +27,8 @@ async def track_lego_logic(url, user_id=None):
                     data = await response.json()
                     message = data.get('message', 'Successfully updated tracking.')
                     price = data.get('price', 'N/A')
-                    return f"{message}. Current price: ${price}. URL: {url}"
+                    target_msg = f" (Target: ${target_price})" if target_price else ""
+                    return f"{message}{target_msg}. Current price: ${price}. URL: {url}"
                 else:
                     return f"Error from scraper: {response.status}"
     except Exception as e:
@@ -68,11 +73,11 @@ class Tracking(commands.Cog):
         self.bot = bot
 
     @commands.command()
-    async def track(self, ctx, url: str):
-        """Tracks the price of a LEGO set from a URL."""
-        logger.info(f"Received !track command from {ctx.author}: {url}")
+    async def track(self, ctx, url: str, target_price: float = None):
+        """Tracks the price of a LEGO set from a URL. Optional: target_price."""
+        logger.info(f"Received !track command from {ctx.author}: {url} (target: {target_price})")
         async with ctx.typing():
-            result = await track_lego_logic(url, user_id=ctx.author.id)
+            result = await track_lego_logic(url, user_id=ctx.author.id, target_price=target_price)
             logger.info(f"!track command completed for {ctx.author}: {result}")
             await ctx.send(result)
 
@@ -92,9 +97,11 @@ class Tracking(commands.Cog):
                             embed = discord.Embed(title="Currently Tracked LEGO Sets", color=discord.Color.gold())
                             for item in data:
                                 price = f"${item['latest_price']}" if item['latest_price'] else "Unknown"
+                                target = f" (Target: ${item['target_price']})" if item.get('target_price') else ""
+                                retailer = f" [{item.get('retailer', 'lego').upper()}]"
                                 embed.add_field(
-                                    name=f"{item['name']} ({item['product_number']})",
-                                    value=f"Price: {price}\n[Link]({item['url']})",
+                                    name=f"{item['name']} ({item['product_number']}){retailer}",
+                                    value=f"Price: {price}{target}\n[Link]({item['url']})",
                                     inline=False
                                 )
                             
@@ -107,10 +114,10 @@ class Tracking(commands.Cog):
                 await ctx.send("Could not reach the tracking database.")
 
     @app_commands.command(name="track", description="Track the price of a LEGO set")
-    @app_commands.describe(url="The LEGO.com product URL")
-    async def slash_track(self, interaction: discord.Interaction, url: str):
+    @app_commands.describe(url="The product URL", target_price="Notify me when price hits this value")
+    async def slash_track(self, interaction: discord.Interaction, url: str, target_price: float = None):
         await interaction.response.defer()
-        result = await track_lego_logic(url, user_id=interaction.user.id)
+        result = await track_lego_logic(url, user_id=interaction.user.id, target_price=target_price)
         await interaction.followup.send(result)
 
     @app_commands.command(name="tracked", description="List your tracked LEGO sets")
@@ -126,9 +133,11 @@ class Tracking(commands.Cog):
                         embed = discord.Embed(title="Your Tracked LEGO Sets", color=discord.Color.gold())
                         for item in data:
                             price = f"${item['latest_price']}" if item['latest_price'] else "Unknown"
+                            target = f" (Target: ${item['target_price']})" if item.get('target_price') else ""
+                            retailer = f" [{item.get('retailer', 'lego').upper()}]"
                             embed.add_field(
-                                name=f"{item['name']} ({item['product_number']})",
-                                value=f"Price: {price}\n[Link]({item['url']})",
+                                name=f"{item['name']} ({item['product_number']}){retailer}",
+                                value=f"Price: {price}{target}\n[Link]({item['url']})",
                                 inline=False
                             )
                         view = TrackedSetsView(data, SCRAPER_BASE_URL)
