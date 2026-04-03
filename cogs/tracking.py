@@ -6,7 +6,7 @@ import logging
 import io
 import pandas as pd
 import matplotlib.pyplot as plt
-from config import TRACK_URL, TRACKED_URL, SCRAPER_BASE_URL, ALERTS_URL
+from config import TRACK_URL, TRACKED_URL, SCRAPER_BASE_URL, ALERTS_URL, LEGO_SEARCH_URL
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,24 @@ class TrackedSetsView(discord.ui.View):
         except Exception as e:
             logger.error(f"Error generating history chart: {e}")
             await interaction.followup.send(f"Error: {e}", ephemeral=True)
+
+class LegoSearchButton(discord.ui.Button):
+    def __init__(self, label, url, user_id):
+        super().__init__(label=label, style=discord.ButtonStyle.secondary)
+        self.url = url
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        result = await track_lego_logic(self.url, user_id=self.user_id)
+        await interaction.followup.send(result, ephemeral=True)
+
+class LegoSearchView(discord.ui.View):
+    def __init__(self, results, user_id):
+        super().__init__(timeout=120)
+        for i, res in enumerate(results[:5]):
+            label = f"Track #{i+1} ({res['retailer'].upper()})"
+            self.add_item(LegoSearchButton(label, res['url'], user_id))
 
 class Tracking(commands.Cog):
     def __init__(self, bot):
@@ -306,6 +324,65 @@ class Tracking(commands.Cog):
         except Exception as e:
             logger.error(f"Error in /tracked: {e}")
             await interaction.followup.send("Could not reach the tracking database.")
+
+    @commands.command(name="search")
+    async def lego_search(self, ctx, *, query: str):
+        """Searches for LEGO sets to track."""
+        logger.info(f"Received !search command from {ctx.author}: {query}")
+        async with ctx.typing():
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(LEGO_SEARCH_URL, params={"q": query}) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            results = data.get('results', [])
+                            if not results:
+                                return await ctx.send(f"No LEGO sets found for '{query}'.")
+                            
+                            embed = discord.Embed(title=f"Search Results: {query}", color=discord.Color.blue())
+                            for i, res in enumerate(results):
+                                embed.add_field(
+                                    name=f"{i+1}. {res['name']} ({res['product_number']})",
+                                    value=f"Retailer: {res['retailer'].upper()}\n[Link]({res['url']})",
+                                    inline=False
+                                )
+                            
+                            view = LegoSearchView(results, ctx.author.id)
+                            await ctx.send(embed=embed, view=view)
+                        else:
+                            await ctx.send(f"Search failed: {response.status}")
+            except Exception as e:
+                logger.error(f"Error in !search: {e}")
+                await ctx.send("Could not complete search.")
+
+    @app_commands.command(name="search", description="Search for LEGO sets to track")
+    @app_commands.describe(query="LEGO set name or number")
+    async def slash_lego_search(self, interaction: discord.Interaction, query: str):
+        await interaction.response.defer()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(LEGO_SEARCH_URL, params={"q": query}) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        results = data.get('results', [])
+                        if not results:
+                            return await interaction.followup.send(f"No LEGO sets found for '{query}'.")
+                        
+                        embed = discord.Embed(title=f"Search Results: {query}", color=discord.Color.blue())
+                        for i, res in enumerate(results):
+                            embed.add_field(
+                                name=f"{i+1}. {res['name']} ({res['product_number']})",
+                                value=f"Retailer: {res['retailer'].upper()}\n[Link]({res['url']})",
+                                inline=False
+                            )
+                        
+                        view = LegoSearchView(results, interaction.user.id)
+                        await interaction.followup.send(embed=embed, view=view)
+                    else:
+                        await interaction.followup.send(f"Search failed: {response.status}")
+        except Exception as e:
+            logger.error(f"Error in /search: {e}")
+            await interaction.followup.send("Could not complete search.")
 
 
 async def setup(bot):
